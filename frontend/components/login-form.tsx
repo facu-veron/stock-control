@@ -10,6 +10,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Form, FormControl, FormDescription, FormField, FormItem, FormLabel, FormMessage } from "@/components/ui/form"
 import { Input } from "@/components/ui/input"
 import { toast } from "@/components/ui/use-toast"
+import { useAuth } from "@/hooks/use-auth"
 import Link from "next/link"
 
 const formSchema = z.object({
@@ -24,7 +25,7 @@ const formSchema = z.object({
 
 export function LoginForm() {
   const router = useRouter()
-  const [isLoading, setIsLoading] = React.useState<boolean>(false)
+  const { login, isLoading, error, clearError } = useAuth()
 
   const form = useForm<z.infer<typeof formSchema>>({
     resolver: zodResolver(formSchema),
@@ -35,16 +36,23 @@ export function LoginForm() {
     },
   })
 
+  React.useEffect(() => {
+    if (error) {
+      toast({
+        title: "Error de inicio de sesión",
+        description: error,
+        variant: "destructive",
+      })
+      clearError()
+    }
+  }, [error, clearError])
+
   async function onSubmit(values: z.infer<typeof formSchema>) {
-    setIsLoading(true)
-
-    // Simulación de inicio de sesión
     try {
-      // Aquí iría la lógica real de autenticación
-      console.log(values)
-
-      // Simulamos un retraso para mostrar el estado de carga
-      await new Promise((resolve) => setTimeout(resolve, 1500))
+      await login({
+        email: values.email,
+        password: values.password,
+      })
 
       toast({
         title: "Inicio de sesión exitoso",
@@ -54,13 +62,8 @@ export function LoginForm() {
       // Redirigir al dashboard
       router.push("/")
     } catch (error) {
-      toast({
-        title: "Error de inicio de sesión",
-        description: "Credenciales incorrectas. Por favor, inténtalo de nuevo.",
-        variant: "destructive",
-      })
-    } finally {
-      setIsLoading(false)
+      // El error ya se maneja en el store y se muestra en el useEffect
+      console.error("Login error:", error)
     }
   }
 

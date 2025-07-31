@@ -9,11 +9,12 @@ import { useRouter } from "next/navigation"
 
 interface RoleGuardProps {
   children: React.ReactNode
+  currentUser?: { role: string } | null
   allowedRoles: ("admin" | "employee")[]
-  fallback?: React.ReactNode
+  fallbackMessage?: React.ReactNode
 }
 
-export function RoleGuard({ children, allowedRoles, fallback }: RoleGuardProps) {
+export function RoleGuard({ children, allowedRoles, fallbackMessage }: RoleGuardProps) {
   const { currentUser, isAuthenticated } = useAuth()
   const router = useRouter()
 
@@ -37,8 +38,8 @@ export function RoleGuard({ children, allowedRoles, fallback }: RoleGuardProps) 
   }
 
   if (!allowedRoles.includes(currentUser.role)) {
-    if (fallback) {
-      return <>{fallback}</>
+    if (fallbackMessage) {
+      return <>{fallbackMessage}</>
     }
 
     return (
