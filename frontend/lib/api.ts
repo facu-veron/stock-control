@@ -26,6 +26,9 @@ export interface User {
   name: string
   role: "ADMIN" | "EMPLOYEE"
   active: boolean
+  pin?: string
+  phone?: string
+  hireDate?: string
   createdAt: string
   updatedAt: string
 }
@@ -34,6 +37,7 @@ export interface Category {
   id: string
   name: string
   description?: string
+  color?: string
   createdAt: string
   updatedAt: string
 }
@@ -42,8 +46,16 @@ export interface Product {
   id: string
   name: string
   description?: string
+  sku?: string
+  barcode?: string
   price: number
+  cost?: number
   stock: number
+  minStock: number
+  maxStock?: number
+  unit: string
+  image?: string
+  active: boolean
   categoryId: string
   category?: Category
   createdAt: string
@@ -53,27 +65,62 @@ export interface Product {
 export interface CreateCategoryRequest {
   name: string
   description?: string
+  color?: string
 }
 
 export interface UpdateCategoryRequest {
   name?: string
   description?: string
+  color?: string
 }
 
 export interface CreateProductRequest {
   name: string
   description?: string
+  sku?: string
+  barcode?: string
   price: number
+  cost?: number
   stock: number
+  minStock: number
+  maxStock?: number
+  unit?: string
+  image?: string
   categoryId: string
 }
 
 export interface UpdateProductRequest {
   name?: string
   description?: string
+  sku?: string
+  barcode?: string
   price?: number
+  cost?: number
   stock?: number
+  minStock?: number
+  maxStock?: number
+  unit?: string
+  image?: string
   categoryId?: string
+}
+
+export interface CreateEmployeeRequest {
+  name: string
+  email: string
+  password: string
+  phone?: string
+  pin: string
+  role: "ADMIN" | "EMPLOYEE"
+}
+
+export interface UpdateEmployeeRequest {
+  name?: string
+  email?: string
+  password?: string
+  phone?: string
+  pin?: string
+  role?: "ADMIN" | "EMPLOYEE"
+  active?: boolean
 }
 
 class ApiClient {
@@ -105,13 +152,13 @@ class ApiClient {
   private async request<T>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
     const url = `${this.baseURL}${endpoint}`
 
-    const headers: Record<string, string> = {
+    const headers: HeadersInit = {
       "Content-Type": "application/json",
-      ...options.headers as Record<string, string>,
+      ...options.headers,
     }
 
     if (this.token) {
-      headers["Authorization"] = `Bearer ${this.token}`
+      headers.Authorization = `Bearer ${this.token}`
     }
 
     try {
@@ -222,6 +269,43 @@ class ApiClient {
   async deleteProduct(id: string): Promise<ApiResponse<void>> {
     return this.request(`/products/${id}`, {
       method: "DELETE",
+    })
+  }
+
+  // Employees endpoints
+  async getEmployees(): Promise<ApiResponse<User[]>> {
+    return this.request("/employees")
+  }
+
+  async getEmployeeById(id: string): Promise<ApiResponse<User>> {
+    return this.request(`/employees/${id}`)
+  }
+
+  async createEmployee(employee: CreateEmployeeRequest): Promise<ApiResponse<User>> {
+    return this.request("/employees", {
+      method: "POST",
+      body: JSON.stringify(employee),
+    })
+  }
+
+  async updateEmployee(id: string, employee: UpdateEmployeeRequest): Promise<ApiResponse<User>> {
+    return this.request(`/employees/${id}`, {
+      method: "PUT",
+      body: JSON.stringify(employee),
+    })
+  }
+
+  async deleteEmployee(id: string): Promise<ApiResponse<void>> {
+    return this.request(`/employees/${id}`, {
+      method: "DELETE",
+    })
+  }
+
+  // PIN verification for sales
+  async verifyEmployeePin(pin: string): Promise<ApiResponse<User>> {
+    return this.request("/employees/verify-pin", {
+      method: "POST",
+      body: JSON.stringify({ pin }),
     })
   }
 }

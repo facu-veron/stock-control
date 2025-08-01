@@ -4,18 +4,27 @@ import { useEffect } from "react"
 import { useAuthStore } from "@/stores/auth-store"
 
 export function useAuth() {
-  const { user, isAuthenticated, isLoading, error, login, register, logout, getProfile, clearError } = useAuthStore()
+  const {
+    user,
+    token,
+    isAuthenticated,
+    isLoading,
+    error,
+    login,
+    register,
+    logout,
+    getProfile,
+    clearError,
+    initialize,
+  } = useAuthStore()
 
-  // Verificar si hay un token guardado al cargar la aplicación
   useEffect(() => {
-    const token = localStorage.getItem("auth_token")
-    if (token && !isAuthenticated && !isLoading) {
-      getProfile()
-    }
-  }, [isAuthenticated, isLoading, getProfile])
+    initialize()
+  }, [initialize])
 
   return {
     user,
+    token,
     isAuthenticated,
     isLoading,
     error,
