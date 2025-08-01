@@ -9,8 +9,8 @@ interface CategoriesState {
 
 interface CategoriesActions {
   fetchCategories: () => Promise<void>
-  createCategory: (category: CreateCategoryRequest) => Promise<Category>
-  updateCategory: (id: string, category: UpdateCategoryRequest) => Promise<Category>
+  createCategory: (category: CreateCategoryRequest) => Promise<void>
+  updateCategory: (id: string, category: UpdateCategoryRequest) => Promise<void>
   deleteCategory: (id: string) => Promise<void>
   clearError: () => void
 }
@@ -46,52 +46,54 @@ export const useCategoriesStore = create<CategoriesStore>((set, get) => ({
     }
   },
 
-  createCategory: async (categoryData: CreateCategoryRequest) => {
-    set({ error: null })
+  createCategory: async (category: CreateCategoryRequest) => {
+    set({ isLoading: true, error: null })
 
     try {
-      const response = await apiClient.createCategory(categoryData)
+      const response = await apiClient.createCategory(category)
 
       if (response.success && response.data) {
-        const newCategory = response.data
         set((state) => ({
-          categories: [...state.categories, newCategory],
+          categories: [...state.categories, response.data!],
+          isLoading: false,
         }))
-        return newCategory
       } else {
         throw new Error(response.error || "Failed to create category")
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to create category"
-      set({ error: errorMessage })
+      set({
+        error: error instanceof Error ? error.message : "Failed to create category",
+        isLoading: false,
+      })
       throw error
     }
   },
 
-  updateCategory: async (id: string, categoryData: UpdateCategoryRequest) => {
-    set({ error: null })
+  updateCategory: async (id: string, category: UpdateCategoryRequest) => {
+    set({ isLoading: true, error: null })
 
     try {
-      const response = await apiClient.updateCategory(id, categoryData)
+      const response = await apiClient.updateCategory(id, category)
 
       if (response.success && response.data) {
-        const updatedCategory = response.data
         set((state) => ({
-          categories: state.categories.map((cat) => (cat.id === id ? updatedCategory : cat)),
+          categories: state.categories.map((cat) => (cat.id === id ? response.data! : cat)),
+          isLoading: false,
         }))
-        return updatedCategory
       } else {
         throw new Error(response.error || "Failed to update category")
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to update category"
-      set({ error: errorMessage })
+      set({
+        error: error instanceof Error ? error.message : "Failed to update category",
+        isLoading: false,
+      })
       throw error
     }
   },
 
   deleteCategory: async (id: string) => {
-    set({ error: null })
+    set({ isLoading: true, error: null })
 
     try {
       const response = await apiClient.deleteCategory(id)
@@ -99,13 +101,16 @@ export const useCategoriesStore = create<CategoriesStore>((set, get) => ({
       if (response.success) {
         set((state) => ({
           categories: state.categories.filter((cat) => cat.id !== id),
+          isLoading: false,
         }))
       } else {
         throw new Error(response.error || "Failed to delete category")
       }
     } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to delete category"
-      set({ error: errorMessage })
+      set({
+        error: error instanceof Error ? error.message : "Failed to delete category",
+        isLoading: false,
+      })
       throw error
     }
   },

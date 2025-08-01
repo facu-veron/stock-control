@@ -1,8 +1,10 @@
 import { create } from "zustand"
+import { persist } from "zustand/middleware"
 import { apiClient, type User, type LoginRequest, type RegisterRequest } from "@/lib/api"
 
 interface AuthState {
   user: User | null
+  token: string | null
   isAuthenticated: boolean
   isLoading: boolean
   error: string | null
@@ -18,100 +20,125 @@ interface AuthActions {
 
 type AuthStore = AuthState & AuthActions
 
-export const useAuthStore = create<AuthStore>((set, get) => ({
-  // State
-  user: null,
-  isAuthenticated: false,
-  isLoading: false,
-  error: null,
-
-  // Actions
-  login: async (credentials: LoginRequest) => {
-    set({ isLoading: true, error: null })
-
-    try {
-      const response = await apiClient.login(credentials)
-
-      if (response.success && response.data) {
-        const { user, token } = response.data
-        apiClient.setToken(token)
-        set({
-          user,
-          isAuthenticated: true,
-          isLoading: false,
-        })
-      } else {
-        throw new Error(response.error || "Login failed")
-      }
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : "Login failed",
-        isLoading: false,
-      })
-      throw error
-    }
-  },
-
-  register: async (userData: RegisterRequest) => {
-    set({ isLoading: true, error: null })
-
-    try {
-      const response = await apiClient.register(userData)
-
-      if (response.success && response.data) {
-        const { user, token } = response.data
-        apiClient.setToken(token)
-        set({
-          user,
-          isAuthenticated: true,
-          isLoading: false,
-        })
-      } else {
-        throw new Error(response.error || "Registration failed")
-      }
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : "Registration failed",
-        isLoading: false,
-      })
-      throw error
-    }
-  },
-
-  logout: () => {
-    apiClient.removeToken()
-    set({
+export const useAuthStore = create<AuthStore>()(
+  persist(
+    (set, get) => ({
+      // State
       user: null,
+      token: null,
       isAuthenticated: false,
+      isLoading: false,
       error: null,
-    })
-  },
 
-  getProfile: async () => {
-    set({ isLoading: true, error: null })
+      // Actions
+      login: async (credentials: LoginRequest) => {
+        set({ isLoading: true, error: null })
 
-    try {
-      const response = await apiClient.getProfile()
+        try {
+          const response = await apiClient.login(credentials)
 
-      if (response.success && response.data) {
+          if (response.success && response.data) {
+            const { user, token } = response.data
+            apiClient.setToken(token)
+            set({
+              user,
+              token,
+              isAuthenticated: true,
+              isLoading: false,
+            })
+          } else {
+            throw new Error(response.error || "Login failed")
+          }
+        } catch (error) {
+          set({
+            error: error instanceof Error ? error.message : "Login failed",
+            isLoading: false,
+          })
+          throw error
+        }
+      },
+
+      register: async (userData: RegisterRequest) => {
+        set({ isLoading: true, error: null })
+
+        try {
+          const response = await apiClient.register(userData)
+
+          if (response.success && response.data) {
+            const { user, token } = response.data
+            apiClient.setToken(token)
+            set({
+              user,
+              token,
+              isAuthenticated: true,
+              isLoading: false,
+            })
+          } else {
+            throw new Error(response.error || "Registration failed")
+          }
+        } catch (error) {
+          set({
+            error: error instanceof Error ? error.message : "Registration failed",
+            isLoading: false,
+          })
+          throw error
+        }
+      },
+
+      logout: () => {
+        apiClient.removeToken()
         set({
-          user: response.data,
-          isAuthenticated: true,
-          isLoading: false,
+          user: null,
+          token: null,
+          isAuthenticated: false,
+          error: null,
         })
-      } else {
-        throw new Error(response.error || "Failed to get profile")
-      }
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : "Failed to get profile",
-        isLoading: false,
-        isAuthenticated: false,
-        user: null,
-      })
-      apiClient.removeToken()
-    }
-  },
+      },
 
-  clearError: () => set({ error: null }),
-}))
+      getProfile: async () => {
+        const { token } = get()
+        if (!token) return
+
+        set({ isLoading: true, error: null })
+
+        try {
+          const response = await apiClient.getProfile()
+
+          if (response.success && response.data) {
+            set({
+              user: response.data,
+              isAuthenticated: true,
+              isLoading: false,
+            })
+          } else {
+            throw new Error(response.error || "Failed to get profile")
+          }
+        } catch (error) {
+          set({
+            error: error instanceof Error ? error.message : "Failed to get profile",
+            isLoading: false,
+            isAuthenticated: false,
+            user: null,
+            token: null,
+          })
+          apiClient.removeToken()
+        }
+      },
+
+      clearError: () => set({ error: null }),
+    }),
+    {
+      name: "auth-storage",
+      partialize: (state) => ({
+        user: state.user,
+        token: state.token,
+        isAuthenticated: state.isAuthenticated,
+      }),
+      onRehydrateStorage: () => (state) => {
+        if (state?.token) {
+          apiClient.setToken(state.token)
+        }
+      },
+    },
+  ),
+)

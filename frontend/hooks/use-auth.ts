@@ -6,13 +6,13 @@ import { useAuthStore } from "@/stores/auth-store"
 export function useAuth() {
   const { user, isAuthenticated, isLoading, error, login, register, logout, getProfile, clearError } = useAuthStore()
 
-  // Verificar si hay un token guardado al cargar la aplicación
+  // Verificar autenticación al cargar
   useEffect(() => {
     const token = localStorage.getItem("auth_token")
-    if (token && !isAuthenticated && !isLoading) {
+    if (token && !user) {
       getProfile()
     }
-  }, [isAuthenticated, isLoading, getProfile])
+  }, [user, getProfile])
 
   return {
     user,
