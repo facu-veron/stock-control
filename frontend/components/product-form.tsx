@@ -29,7 +29,7 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
     taxRate: initialData?.taxRate || "21",
     barcode: initialData?.barcode || "",
     supplier: initialData?.supplier || "",
-    tags: initialData?.tags || "",
+    tags: initialData?.tags || "" as string,
     size: initialData?.size || "",
     color: initialData?.color || "",
     material: initialData?.material || "",
@@ -181,7 +181,7 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
       taxRate: Number.parseFloat(formData.taxRate),
       tags: formData.tags
         .split(",")
-        .map((tag) => tag.trim())
+        .map((tag: string) => tag.trim())
         .filter(Boolean),
       margin: Number.parseFloat(calculateMargin()),
       priceWithTax: Number.parseFloat(calculatePriceWithTax()),

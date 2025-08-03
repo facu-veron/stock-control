@@ -1,64 +1,22 @@
 "use client"
 
-import * as React from "react"
-import type { Employee } from "@/components/pos/pos-interface"
+// Este componente ha sido refactorizado para usar directamente el store de Zustand
+// y evitar la duplicación de lógica de estado. El AuthContext ya no es necesario.
 
-interface AuthContextType {
-  currentUser: Employee | null
-  login: (user: Employee) => void
-  logout: () => void
-  isAuthenticated: boolean
-}
+import type * as React from "react"
+import { useAuthStore } from "@/stores/auth-store"
 
-const AuthContext = React.createContext<AuthContextType | undefined>(undefined)
-
+/**
+ * El AuthProvider ahora solo actúa como un componente de paso.
+ * La lógica de estado de autenticación reside completamente en el store de Zustand.
+ */
 export function AuthProvider({ children }: { children: React.ReactNode }) {
-  const [currentUser, setCurrentUser] = React.useState<Employee | null>(null)
-
-  // Cargar usuario desde localStorage al inicializar
-  React.useEffect(() => {
-    try {
-      const savedUser = localStorage.getItem("currentUser")
-      if (savedUser) {
-        setCurrentUser(JSON.parse(savedUser))
-      }
-    } catch (error) {
-      console.error("Error loading user from localStorage:", error)
-    }
-  }, [])
-
-  const login = (user: Employee) => {
-    setCurrentUser(user)
-    try {
-      localStorage.setItem("currentUser", JSON.stringify(user))
-    } catch (error) {
-      console.error("Error saving user to localStorage:", error)
-    }
-  }
-
-  const logout = () => {
-    setCurrentUser(null)
-    try {
-      localStorage.removeItem("currentUser")
-    } catch (error) {
-      console.error("Error removing user from localStorage:", error)
-    }
-  }
-
-  const value = {
-    currentUser,
-    login,
-    logout,
-    isAuthenticated: !!currentUser,
-  }
-
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
+  return <>{children}</>
 }
 
-export function useAuth() {
-  const context = React.useContext(AuthContext)
-  if (context === undefined) {
-    throw new Error("useAuth must be used within an AuthProvider")
-  }
-  return context
-}
+/**
+ * El hook useAuth ahora es un alias directo para useAuthStore.
+ * Esto garantiza una única fuente de verdad para el estado de autenticación
+ * en toda la aplicación.
+ */
+export const useAuth = useAuthStore

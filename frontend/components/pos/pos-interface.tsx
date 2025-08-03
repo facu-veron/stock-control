@@ -1,9 +1,11 @@
 "use client"
 
+import { CardDescription } from "@/components/ui/card"
+
 import * as React from "react"
 import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { toast } from "@/components/ui/use-toast"
 import { ProductSelector } from "@/components/pos/product-selector"
 import { CustomerSelector } from "@/components/pos/customer-selector"
@@ -12,12 +14,13 @@ import { PreInvoice } from "@/components/pos/pre-invoice"
 import { InvoiceProcessing } from "@/components/pos/invoice-processing"
 import { InvoiceSuccess } from "@/components/pos/invoice-success"
 import { InvoiceError } from "@/components/pos/invoice-error"
-import { EmployeeLogin } from "@/components/pos/employee-login"
+import { PinVerification } from "@/components/pos/pin-verification"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Receipt, FileText, User, LogOut, ShoppingCart, Package, Clock } from "lucide-react"
-import { useAuth } from "@/components/auth/auth-provider"
+import { useAuthStore } from "@/stores/auth-store"
+import type { User as Employee, Customer } from "@/lib/api"
 
 // Tipos
 export type CartItem = {
@@ -30,29 +33,6 @@ export type CartItem = {
   discount: number
   total: number
   category?: string
-}
-
-export type Customer = {
-  id: string
-  name: string
-  documentType: string
-  documentNumber: string
-  email: string
-  address: string
-  taxCondition: "Responsable Inscripto" | "Consumidor Final" | "Monotributista" | "Exento"
-  taxId: string // CUIT/CUIL
-}
-
-export type Employee = {
-  id: string
-  name: string
-  pin: string
-  role: "admin" | "employee"
-  isActive: boolean
-  email?: string
-  phone?: string
-  hireDate?: Date
-  permissions?: string[]
 }
 
 export type InvoiceType = "A" | "B" | "C" | "TICKET"
@@ -76,12 +56,12 @@ export type InvoiceData = {
 }
 
 // Estados del proceso de facturación
-type PosState = "login" | "cart" | "pre-invoice" | "processing" | "success" | "error"
+type PosState = "cart" | "pre-invoice" | "pin-verification" | "processing" | "success" | "error"
 
 export function PosInterface() {
   const router = useRouter()
-  const { currentUser, login, logout } = useAuth()
-  const [state, setState] = React.useState<PosState>(currentUser ? "cart" : "login")
+  const { user, logout } = useAuthStore()
+  const [state, setState] = React.useState<PosState>("cart")
   const [cart, setCart] = React.useState<CartItem[]>([])
   const [customer, setCustomer] = React.useState<Customer | null>(null)
   const [invoiceData, setInvoiceData] = React.useState<InvoiceData | null>(null)
@@ -90,15 +70,7 @@ export function PosInterface() {
   const [paymentMethod, setPaymentMethod] = React.useState<"efectivo" | "tarjeta" | "transferencia">("efectivo")
   const [discount, setDiscount] = React.useState<number>(0)
   const [errorMessage, setErrorMessage] = React.useState<string>("")
-
-  // Sincronizar estado con usuario actual
-  React.useEffect(() => {
-    if (currentUser) {
-      setState("cart")
-    } else {
-      setState("login")
-    }
-  }, [currentUser])
+  const [saleEmployee, setSaleEmployee] = React.useState<Employee | null>(null)
 
   // Calcular totales del carrito (siempre en pesos)
   const cartTotals = React.useMemo(() => {
@@ -134,24 +106,10 @@ export function PosInterface() {
     }
   }, [paymentMethod])
 
-  // Login de empleado
-  const handleEmployeeLogin = (employee: Employee) => {
-    login(employee)
-    setState("cart")
-    toast({
-      title: "Bienvenido",
-      description: `Hola ${employee.name}, sesión iniciada correctamente`,
-    })
-  }
-
-  // Logout de empleado
-  const handleEmployeeLogout = () => {
+  // Logout del usuario
+  const handleLogout = () => {
     logout()
-    setCart([])
-    setCustomer(null)
-    setInvoiceData(null)
-    setDiscount(0)
-    setState("login")
+    router.push("/login")
     toast({
       title: "Sesión cerrada",
       description: "Has cerrado sesión correctamente",
@@ -252,10 +210,20 @@ export function PosInterface() {
     setState("pre-invoice")
   }
 
-  // Confirmar factura/ticket
-  const confirmInvoice = () => {
-    setState("processing")
+  // Proceder a verificación de PIN
+  const proceedToPinVerification = () => {
+    setState("pin-verification")
+  }
 
+  // Manejar verificación de PIN del empleado
+  const handleEmployeeVerified = (employee: Employee) => {
+    setSaleEmployee(employee)
+    setState("processing")
+    confirmInvoice(employee)
+  }
+
+  // Confirmar factura/ticket
+  const confirmInvoice = (employee: Employee) => {
     // Simular proceso de facturación electrónica con AFIP (solo para facturas)
     const processingTime = documentType === "ticket" ? 1000 : 3000
 
@@ -286,7 +254,7 @@ export function PosInterface() {
         type: invoiceType,
         date: now,
         customer: customer,
-        employee: currentUser!,
+        employee: employee, // Usar el empleado verificado por PIN
         items: cart,
         subtotal: cartTotals.subtotal,
         tax: cartTotals.tax,
@@ -313,12 +281,17 @@ export function PosInterface() {
       saveInvoiceToHistory(newInvoice)
 
       // Registrar venta del empleado
-      registerEmployeeSale(currentUser!, newInvoice)
+      registerEmployeeSale(employee, newInvoice)
     }, processingTime)
   }
 
   // Reintentar facturación en caso de error
   const retryInvoice = () => {
+    if (!saleEmployee) {
+      setState("pin-verification")
+      return
+    }
+
     setState("processing")
     setErrorMessage("")
 
@@ -336,7 +309,7 @@ export function PosInterface() {
         type: invoiceType,
         date: now,
         customer: customer,
-        employee: currentUser!,
+        employee: saleEmployee,
         items: cart,
         subtotal: cartTotals.subtotal,
         tax: cartTotals.tax,
@@ -360,7 +333,7 @@ export function PosInterface() {
       saveInvoiceToHistory(newInvoice)
 
       // Registrar venta del empleado
-      registerEmployeeSale(currentUser!, newInvoice)
+      registerEmployeeSale(saleEmployee, newInvoice)
     }, 3000)
   }
 
@@ -436,12 +409,13 @@ export function PosInterface() {
     setInvoiceData(null)
     setDiscount(0)
     setPaymentMethod("efectivo")
+    setSaleEmployee(null)
     setState("cart")
   }
 
   // Ver factura/ticket generado
   const viewInvoice = () => {
-    if (invoiceData && currentUser?.role === "admin") {
+    if (invoiceData && user?.role === "ADMIN") {
       router.push(`/facturas/${invoiceData.id}`)
     } else {
       toast({
@@ -460,8 +434,8 @@ export function PosInterface() {
     }
   }
 
-  if (state === "login") {
-    return <EmployeeLogin onLogin={handleEmployeeLogin} />
+  if (!user) {
+    return null
   }
 
   return (
@@ -472,17 +446,17 @@ export function PosInterface() {
           <h2 className="text-3xl font-bold tracking-tight">Punto de Venta</h2>
           <Badge variant="outline" className="flex items-center gap-1">
             <User className="h-3 w-3" />
-            {currentUser?.name}
-            <span className="text-xs">({currentUser?.role === "admin" ? "Admin" : "Empleado"})</span>
+            {user.name}
+            <span className="text-xs">({user.role === "ADMIN" ? "Admin" : "Empleado"})</span>
           </Badge>
         </div>
         <div className="flex items-center space-x-2">
-          {currentUser?.role === "admin" && (
+          {user.role === "ADMIN" && (
             <Button variant="outline" size="sm" onClick={() => router.push("/")}>
               Dashboard
             </Button>
           )}
-          <Button variant="outline" size="sm" onClick={handleEmployeeLogout}>
+          <Button variant="outline" size="sm" onClick={handleLogout}>
             <LogOut className="h-4 w-4 mr-1" />
             Cerrar Sesión
           </Button>
@@ -612,14 +586,23 @@ export function PosInterface() {
         <PreInvoice
           cart={cart}
           customer={customer}
-          employee={currentUser!}
+          employee={user}
           totals={cartTotals}
           invoiceType={invoiceType}
           documentType={documentType}
           paymentMethod={paymentMethod}
           discount={discount}
           onBack={() => setState("cart")}
-          onConfirm={confirmInvoice}
+          onConfirm={proceedToPinVerification}
+        />
+      )}
+
+      {state === "pin-verification" && (
+        <PinVerification
+          onEmployeeVerified={handleEmployeeVerified}
+          onCancel={() => setState("pre-invoice")}
+          title="Verificación de Vendedor"
+          description="Ingresa tu PIN de 4 dígitos para procesar la venta"
         />
       )}
 
@@ -630,7 +613,7 @@ export function PosInterface() {
           invoiceData={invoiceData}
           onNewSale={startNewSale}
           onViewInvoice={viewInvoice}
-          canViewInvoice={currentUser?.role === "admin"}
+          canViewInvoice={user.role === "ADMIN"}
         />
       )}
 

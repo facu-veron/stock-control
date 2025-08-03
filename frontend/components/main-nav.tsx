@@ -1,99 +1,49 @@
 "use client"
 
 import type React from "react"
-
 import Link from "next/link"
 import { usePathname } from "next/navigation"
+import { useAuthStore } from "@/stores/auth-store"
 import { cn } from "@/lib/utils"
-import { useAuth } from "@/components/auth/auth-provider"
 
 export function MainNav({ className, ...props }: React.HTMLAttributes<HTMLElement>) {
   const pathname = usePathname()
-  const { currentUser } = useAuth()
+  const { user } = useAuthStore()
 
-  // Si es empleado, solo mostrar punto de venta
-  if (currentUser?.role === "employee") {
-    return (
-      <nav className={cn("flex items-center space-x-4 lg:space-x-6", className)} {...props}>
-        <Link
-          href="/pos"
-          className={cn(
-            "text-sm font-medium transition-colors hover:text-primary",
-            pathname === "/pos" ? "text-foreground" : "text-muted-foreground",
-          )}
-        >
-          Punto de Venta
-        </Link>
-      </nav>
-    )
+  if (!user) {
+    return null
   }
 
-  // Navegación completa para administradores
+  const allRoutes = [
+    { href: "/", label: "Dashboard", roles: ["ADMIN"] },
+    { href: "/productos", label: "Productos", roles: ["ADMIN"] },
+    { href: "/categorias", label: "Categorías", roles: ["ADMIN"] },
+    { href: "/facturas", label: "Facturas", roles: ["ADMIN"] },
+    { href: "/empleados", label: "Empleados", roles: ["ADMIN"] },
+    { href: "/pos", label: "Punto de Venta", roles: ["ADMIN", "EMPLOYEE"] },
+    { href: "/configuraciones", label: "Configuraciones", roles: ["ADMIN", "EMPLOYEE"] },
+  ]
+
+  const accessibleRoutes = allRoutes.filter((route) => route.roles.includes(user.role))
+
   return (
     <nav className={cn("flex items-center space-x-4 lg:space-x-6", className)} {...props}>
-      <Link
-        href="/"
-        className={cn(
-          "text-sm font-medium transition-colors hover:text-primary",
-          pathname === "/" ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        Dashboard
-      </Link>
-      <Link
-        href="/productos"
-        className={cn(
-          "text-sm font-medium transition-colors hover:text-primary",
-          pathname?.startsWith("/productos") ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        Productos
-      </Link>
-      <Link
-        href="/categorias"
-        className={cn(
-          "text-sm font-medium transition-colors hover:text-primary",
-          pathname === "/categorias" ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        Categorías
-      </Link>
-      <Link
-        href="/empleados"
-        className={cn(
-          "text-sm font-medium transition-colors hover:text-primary",
-          pathname === "/empleados" ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        Empleados
-      </Link>
-      <Link
-        href="/pos"
-        className={cn(
-          "text-sm font-medium transition-colors hover:text-primary",
-          pathname === "/pos" ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        Punto de Venta
-      </Link>
-      <Link
-        href="/facturas"
-        className={cn(
-          "text-sm font-medium transition-colors hover:text-primary",
-          pathname?.startsWith("/facturas") ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        Facturas
-      </Link>
-      <Link
-        href="/configuraciones"
-        className={cn(
-          "text-sm font-medium transition-colors hover:text-primary",
-          pathname === "/configuraciones" ? "text-foreground" : "text-muted-foreground",
-        )}
-      >
-        Configuraciones
-      </Link>
+      {accessibleRoutes.map((route) => (
+        <Link
+          key={route.href}
+          href={route.href}
+          className={cn(
+            "text-sm font-medium transition-colors hover:text-primary",
+            pathname.startsWith(route.href) && route.href !== "/"
+              ? "text-foreground"
+              : pathname === route.href
+                ? "text-foreground"
+                : "text-muted-foreground",
+          )}
+        >
+          {route.label}
+        </Link>
+      ))}
     </nav>
   )
 }
