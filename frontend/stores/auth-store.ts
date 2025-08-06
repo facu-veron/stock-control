@@ -1,6 +1,7 @@
 import { create } from "zustand"
 import { persist } from "zustand/middleware"
-import { apiClient, type User, type LoginRequest, type RegisterRequest } from "@/lib/api"
+import * as api from "@/lib/api"
+import type { User, LoginRequest, RegisterRequest } from "@/lib/api"
 
 interface AuthState {
   user: User | null
@@ -36,20 +37,14 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null })
 
         try {
-          const response = await apiClient.login(credentials)
-
-          if (response.success && response.data) {
-            const { user, token } = response.data
-            apiClient.setToken(token)
-            set({
-              user,
-              token,
-              isAuthenticated: true,
-              isLoading: false,
-            })
-          } else {
-            throw new Error(response.error || "Login failed")
-          }
+          const { user, token } = await api.login(credentials)
+          localStorage.setItem("token", token)
+          set({
+            user,
+            token,
+            isAuthenticated: true,
+            isLoading: false,
+          })
         } catch (error) {
           set({
             error: error instanceof Error ? error.message : "Login failed",
@@ -63,20 +58,14 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null })
 
         try {
-          const response = await apiClient.register(userData)
-
-          if (response.success && response.data) {
-            const { user, token } = response.data
-            apiClient.setToken(token)
-            set({
-              user,
-              token,
-              isAuthenticated: true,
-              isLoading: false,
-            })
-          } else {
-            throw new Error(response.error || "Registration failed")
-          }
+          const { user, token } = await api.register(userData)
+          localStorage.setItem("token", token)
+          set({
+            user,
+            token,
+            isAuthenticated: true,
+            isLoading: false,
+          })
         } catch (error) {
           set({
             error: error instanceof Error ? error.message : "Registration failed",
@@ -87,7 +76,7 @@ export const useAuthStore = create<AuthStore>()(
       },
 
       logout: () => {
-        apiClient.removeToken()
+        localStorage.removeItem("token")
         set({
           user: null,
           token: null,
@@ -103,17 +92,12 @@ export const useAuthStore = create<AuthStore>()(
         set({ isLoading: true, error: null })
 
         try {
-          const response = await apiClient.getProfile()
-
-          if (response.success && response.data) {
-            set({
-              user: response.data,
-              isAuthenticated: true,
-              isLoading: false,
-            })
-          } else {
-            throw new Error(response.error || "Failed to get profile")
-          }
+          const user = await api.getMe()
+          set({
+            user,
+            isAuthenticated: true,
+            isLoading: false,
+          })
         } catch (error) {
           set({
             error: error instanceof Error ? error.message : "Failed to get profile",
@@ -122,14 +106,14 @@ export const useAuthStore = create<AuthStore>()(
             user: null,
             token: null,
           })
-          apiClient.removeToken()
+          localStorage.removeItem("token")
         }
       },
 
       initialize: async () => {
         const { token } = get()
         if (token) {
-          apiClient.setToken(token)
+          localStorage.setItem("token", token)
           await get().getProfile()
         }
       },
@@ -145,7 +129,7 @@ export const useAuthStore = create<AuthStore>()(
       }),
       onRehydrateStorage: () => (state) => {
         if (state?.token) {
-          apiClient.setToken(state.token)
+          localStorage.setItem("token", state.token)
         }
       },
     },

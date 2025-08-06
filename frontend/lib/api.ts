@@ -1,34 +1,12 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"
 
-export interface ApiResponse<T = any> {
-  success: boolean
-  message?: string
-  data?: T
-  error?: string
-  details?: any[]
-}
-
-export interface LoginRequest {
-  email: string
-  password: string
-}
-
-export interface RegisterRequest {
-  email: string
-  password: string
-  name: string
-  role?: "ADMIN" | "EMPLOYEE"
-}
-
+// Tipos definidos en el frontend
 export interface User {
   id: string
   email: string
   name: string
   role: "ADMIN" | "EMPLOYEE"
   active: boolean
-  pin?: string
-  phone?: string
-  hireDate?: string
   createdAt: string
   updatedAt: string
 }
@@ -42,35 +20,72 @@ export interface Category {
   updatedAt: string
 }
 
+export interface Supplier {
+  id: string
+  name: string
+  contact?: string
+  email?: string
+  phone?: string
+  createdAt: string
+  updatedAt: string
+}
+
+export interface Tag {
+  id: string
+  name: string
+}
+
 export interface Product {
   id: string
   name: string
   description?: string
-  sku?: string
-  barcode?: string
   price: number
   cost?: number
   stock: number
   minStock: number
   maxStock?: number
+  sku?: string
+  barcode?: string
+  brand?: string
+  color?: string
+  size?: string
+  material?: string
   unit: string
+  ivaRate?: number
   image?: string
   active: boolean
-  categoryId: string
-  category?: Category
   createdAt: string
   updatedAt: string
+  categoryId: string
+  supplierId?: string
+  category: {
+    id: string
+    name: string
+    color?: string
+  }
+  supplier?: {
+    id: string
+    name: string
+    contact?: string
+  }
+  tags: Tag[]
 }
 
-export interface Customer {
-  id: string
-  name: string
-  documentType: string
-  documentNumber: string
+// Tipos para las peticiones
+export interface LoginRequest {
   email: string
-  address: string
-  taxCondition: "Responsable Inscripto" | "Consumidor Final" | "Monotributista" | "Exento"
-  taxId: string // CUIT/CUIL
+  password: string
+}
+
+export interface RegisterRequest {
+  name: string
+  email: string
+  password: string
+}
+
+export interface AuthResponse {
+  user: User
+  token: string
 }
 
 export interface CreateCategoryRequest {
@@ -79,246 +94,358 @@ export interface CreateCategoryRequest {
   color?: string
 }
 
-export interface UpdateCategoryRequest {
-  name?: string
-  description?: string
-  color?: string
-}
+export interface UpdateCategoryRequest extends Partial<CreateCategoryRequest> {}
 
 export interface CreateProductRequest {
   name: string
   description?: string
-  sku?: string
-  barcode?: string
   price: number
   cost?: number
   stock: number
   minStock: number
   maxStock?: number
-  unit?: string
-  image?: string
-  categoryId: string
-}
-
-export interface UpdateProductRequest {
-  name?: string
-  description?: string
   sku?: string
   barcode?: string
-  price?: number
-  cost?: number
-  stock?: number
-  minStock?: number
-  maxStock?: number
-  unit?: string
+  brand?: string
+  color?: string
+  size?: string
+  material?: string
+  unit: string
+  ivaRate?: number
   image?: string
-  categoryId?: string
+  categoryId: string
+  supplierId?: string
+  tagIds?: string[]
 }
+
+export interface UpdateProductRequest extends Partial<CreateProductRequest> {}
+
+export interface CreateSupplierRequest {
+  name: string
+  contact?: string
+  email?: string
+  phone?: string
+}
+
+export interface UpdateSupplierRequest extends Partial<CreateSupplierRequest> {}
 
 export interface CreateEmployeeRequest {
   name: string
   email: string
-  password: string
-  phone?: string
-  pin: string
-  role: "ADMIN" | "EMPLOYEE"
+  password?: string
+  role?: "ADMIN" | "EMPLOYEE"
+  active?: boolean
 }
 
 export interface UpdateEmployeeRequest {
   name?: string
   email?: string
   password?: string
-  phone?: string
-  pin?: string
   role?: "ADMIN" | "EMPLOYEE"
   active?: boolean
 }
 
-class ApiClient {
-  private baseURL: string
-  private token: string | null = null
+// Tipos para las respuestas
+export interface ApiResponse<T> {
+  success: boolean
+  data: T
+  message?: string
+  error?: string
+}
 
-  constructor(baseURL: string) {
-    this.baseURL = baseURL
-    // Cargar token del localStorage si existe
-    if (typeof window !== "undefined") {
-      this.token = localStorage.getItem("auth_token")
-    }
-  }
-
-  setToken(token: string) {
-    this.token = token
-    if (typeof window !== "undefined") {
-      localStorage.setItem("auth_token", token)
-    }
-  }
-
-  removeToken() {
-    this.token = null
-    if (typeof window !== "undefined") {
-      localStorage.removeItem("auth_token")
-    }
-  }
-
-  private async request<T>(endpoint: string, options: RequestInit = {}): Promise<ApiResponse<T>> {
-    const url = `${this.baseURL}${endpoint}`
-
-    const headers: HeadersInit = {
-      "Content-Type": "application/json",
-      ...options.headers,
-    }
-
-    if (this.token) {
-      (headers as Record<string, string>).Authorization = `Bearer ${this.token}`
-    }
-
-    try {
-      const response = await fetch(url, {
-        ...options,
-        headers,
-      })
-
-      const data = await response.json()
-
-      if (!response.ok) {
-        throw new Error(data.error || `HTTP error! status: ${response.status}`)
-      }
-
-      return data
-    } catch (error) {
-      console.error("API request failed:", error)
-      throw error
-    }
-  }
-
-  // Auth endpoints
-  async login(credentials: LoginRequest): Promise<ApiResponse<{ user: User; token: string }>> {
-    return this.request("/auth/login", {
-      method: "POST",
-      body: JSON.stringify(credentials),
-    })
-  }
-
-  async register(userData: RegisterRequest): Promise<ApiResponse<{ user: User; token: string }>> {
-    return this.request("/auth/register", {
-      method: "POST",
-      body: JSON.stringify(userData),
-    })
-  }
-
-  async getProfile(): Promise<ApiResponse<User>> {
-    return this.request("/auth/profile")
-  }
-
-  // Categories endpoints
-  async getCategories(): Promise<ApiResponse<Category[]>> {
-    return this.request("/categories")
-  }
-
-  async getCategoryById(id: string): Promise<ApiResponse<Category>> {
-    return this.request(`/categories/${id}`)
-  }
-
-  async createCategory(category: CreateCategoryRequest): Promise<ApiResponse<Category>> {
-    return this.request("/categories", {
-      method: "POST",
-      body: JSON.stringify(category),
-    })
-  }
-
-  async updateCategory(id: string, category: UpdateCategoryRequest): Promise<ApiResponse<Category>> {
-    return this.request(`/categories/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(category),
-    })
-  }
-
-  async deleteCategory(id: string): Promise<ApiResponse<void>> {
-    return this.request(`/categories/${id}`, {
-      method: "DELETE",
-    })
-  }
-
-  // Products endpoints
-  async getProducts(params?: {
-    search?: string
-    category?: string
-    page?: number
-    limit?: number
-  }): Promise<ApiResponse<{ products: Product[]; pagination: any }>> {
-    const searchParams = new URLSearchParams()
-
-    if (params?.search) searchParams.append("search", params.search)
-    if (params?.category) searchParams.append("category", params.category)
-    if (params?.page) searchParams.append("page", params.page.toString())
-    if (params?.limit) searchParams.append("limit", params.limit.toString())
-
-    const queryString = searchParams.toString()
-    const endpoint = queryString ? `/products?${queryString}` : "/products"
-
-    return this.request(endpoint)
-  }
-
-  async getProductById(id: string): Promise<ApiResponse<Product>> {
-    return this.request(`/products/${id}`)
-  }
-
-  async createProduct(product: CreateProductRequest): Promise<ApiResponse<Product>> {
-    return this.request("/products", {
-      method: "POST",
-      body: JSON.stringify(product),
-    })
-  }
-
-  async updateProduct(id: string, product: UpdateProductRequest): Promise<ApiResponse<Product>> {
-    return this.request(`/products/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(product),
-    })
-  }
-
-  async deleteProduct(id: string): Promise<ApiResponse<void>> {
-    return this.request(`/products/${id}`, {
-      method: "DELETE",
-    })
-  }
-
-  // Employees endpoints
-  async getEmployees(): Promise<ApiResponse<User[]>> {
-    return this.request("/employees")
-  }
-
-  async getEmployeeById(id: string): Promise<ApiResponse<User>> {
-    return this.request(`/employees/${id}`)
-  }
-
-  async createEmployee(employee: CreateEmployeeRequest): Promise<ApiResponse<User>> {
-    return this.request("/employees", {
-      method: "POST",
-      body: JSON.stringify(employee),
-    })
-  }
-
-  async updateEmployee(id: string, employee: UpdateEmployeeRequest): Promise<ApiResponse<User>> {
-    return this.request(`/employees/${id}`, {
-      method: "PUT",
-      body: JSON.stringify(employee),
-    })
-  }
-
-  async deleteEmployee(id: string): Promise<ApiResponse<void>> {
-    return this.request(`/employees/${id}`, {
-      method: "DELETE",
-    })
-  }
-
-  // PIN verification for sales
-  async verifyEmployeePin(pin: string): Promise<ApiResponse<User>> {
-    return this.request("/employees/verify-pin", {
-      method: "POST",
-      body: JSON.stringify({ pin }),
-    })
+export interface PaginatedResponse<T> {
+  success: boolean
+  data: T[]
+  pagination: {
+    page: number
+    limit: number
+    total: number
+    pages: number
   }
 }
 
-export const apiClient = new ApiClient(API_BASE_URL)
+// Función auxiliar para hacer peticiones con autenticación
+async function fetchApi<T>(url: string, options?: RequestInit): Promise<ApiResponse<T> | PaginatedResponse<T>> {
+  const token = typeof window !== "undefined" ? localStorage.getItem("token") : null
+  const headers = {
+    "Content-Type": "application/json",
+    ...(token && { Authorization: `Bearer ${token}` }),
+    ...options?.headers,
+  }
+
+  const response = await fetch(`${API_BASE_URL}${url}`, { ...options, headers })
+  const data = await response.json()
+
+  if (!response.ok) {
+    throw new Error(data.error || "Something went wrong")
+  }
+
+  return data
+}
+
+// Auth API
+export const login = async (credentials: LoginRequest): Promise<AuthResponse> => {
+  const response = (await fetchApi<AuthResponse>("/auth/login", {
+    method: "POST",
+    body: JSON.stringify(credentials),
+  })) as ApiResponse<AuthResponse>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Login failed")
+}
+
+export const register = async (userData: RegisterRequest): Promise<AuthResponse> => {
+  const response = (await fetchApi<AuthResponse>("/auth/register", {
+    method: "POST",
+    body: JSON.stringify(userData),
+  })) as ApiResponse<AuthResponse>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Registration failed")
+}
+
+export const getMe = async (): Promise<User> => {
+  const response = (await fetchApi<User>("/auth/me")) as ApiResponse<User>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to get profile")
+}
+
+// Products API - Corregido para manejar la respuesta paginada correctamente
+export const getProducts = async (params?: {
+  page?: number
+  limit?: number
+  search?: string
+  categoryId?: string
+  supplierId?: string
+  brand?: string
+}): Promise<PaginatedResponse<Product>> => {
+  const query = new URLSearchParams()
+  if (params?.page) query.append("page", params.page.toString())
+  if (params?.limit) query.append("limit", params.limit.toString())
+  if (params?.search) query.append("search", params.search)
+  if (params?.categoryId) query.append("categoryId", params.categoryId)
+  if (params?.supplierId) query.append("supplierId", params.supplierId)
+  if (params?.brand) query.append("brand", params.brand)
+
+  // Para productos, el backend devuelve directamente la respuesta paginada
+  const response = await fetchApi<Product>(`/products?${query.toString()}`)
+
+  // Verificamos si es una respuesta paginada directa o envuelta en ApiResponse
+  if ("pagination" in response) {
+    return response as PaginatedResponse<Product>
+  } else {
+    // Si viene envuelta en ApiResponse, extraemos los datos
+    const apiResponse = response as unknown as ApiResponse<PaginatedResponse<Product>>
+    if (apiResponse.success) {
+      return apiResponse.data
+    }
+    throw new Error(apiResponse.error || "Failed to fetch products")
+  }
+}
+
+export const getProductById = async (id: string): Promise<Product> => {
+  const response = (await fetchApi<Product>(`/products/${id}`)) as ApiResponse<Product>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to fetch product")
+}
+
+export const createProduct = async (product: CreateProductRequest): Promise<Product> => {
+  const response = (await fetchApi<Product>("/products", {
+    method: "POST",
+    body: JSON.stringify(product),
+  })) as ApiResponse<Product>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to create product")
+}
+
+export const updateProduct = async (id: string, product: UpdateProductRequest): Promise<Product> => {
+  const response = (await fetchApi<Product>(`/products/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(product),
+  })) as ApiResponse<Product>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to update product")
+}
+
+export const deleteProduct = async (id: string): Promise<void> => {
+  const response = (await fetchApi<null>(`/products/${id}`, {
+    method: "DELETE",
+  })) as ApiResponse<null>
+  if (!response.success) {
+    throw new Error(response.error || "Failed to delete product")
+  }
+}
+
+// Categories API
+export const getCategories = async (): Promise<Category[]> => {
+  const response = (await fetchApi<Category[]>("/categories")) as ApiResponse<Category[]>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to fetch categories")
+}
+
+export const getCategoryById = async (id: string): Promise<Category> => {
+  const response = (await fetchApi<Category>(`/categories/${id}`)) as ApiResponse<Category>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to fetch category")
+}
+
+export const createCategory = async (category: CreateCategoryRequest): Promise<Category> => {
+  const response = (await fetchApi<Category>("/categories", {
+    method: "POST",
+    body: JSON.stringify(category),
+  })) as ApiResponse<Category>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to create category")
+}
+
+export const updateCategory = async (id: string, category: UpdateCategoryRequest): Promise<Category> => {
+  const response = (await fetchApi<Category>(`/categories/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(category),
+  })) as ApiResponse<Category>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to update category")
+}
+
+export const deleteCategory = async (id: string): Promise<void> => {
+  const response = (await fetchApi<null>(`/categories/${id}`, {
+    method: "DELETE",
+  })) as ApiResponse<null>
+  if (!response.success) {
+    throw new Error(response.error || "Failed to delete category")
+  }
+}
+
+// Employees API
+export const getEmployees = async (): Promise<User[]> => {
+  const response = (await fetchApi<User[]>("/employees")) as ApiResponse<User[]>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to fetch employees")
+}
+
+export const getEmployeeById = async (id: string): Promise<User> => {
+  const response = (await fetchApi<User>(`/employees/${id}`)) as ApiResponse<User>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to fetch employee")
+}
+
+export const createEmployee = async (employee: CreateEmployeeRequest): Promise<User> => {
+  const response = (await fetchApi<User>("/employees", {
+    method: "POST",
+    body: JSON.stringify(employee),
+  })) as ApiResponse<User>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to create employee")
+}
+
+export const updateEmployee = async (id: string, employee: UpdateEmployeeRequest): Promise<User> => {
+  const response = (await fetchApi<User>(`/employees/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(employee),
+  })) as ApiResponse<User>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to update employee")
+}
+
+export const deleteEmployee = async (id: string): Promise<void> => {
+  const response = (await fetchApi<null>(`/employees/${id}`, {
+    method: "DELETE",
+  })) as ApiResponse<null>
+  if (!response.success) {
+    throw new Error(response.error || "Failed to delete employee")
+  }
+}
+
+// Suppliers API
+export const getSuppliers = async (): Promise<Supplier[]> => {
+  const response = (await fetchApi<Supplier[]>("/suppliers")) as ApiResponse<Supplier[]>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to fetch suppliers")
+}
+
+export const getSupplierById = async (id: string): Promise<Supplier> => {
+  const response = (await fetchApi<Supplier>(`/suppliers/${id}`)) as ApiResponse<Supplier>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to fetch supplier")
+}
+
+export const createSupplier = async (supplier: CreateSupplierRequest): Promise<Supplier> => {
+  const response = (await fetchApi<Supplier>("/suppliers", {
+    method: "POST",
+    body: JSON.stringify(supplier),
+  })) as ApiResponse<Supplier>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to create supplier")
+}
+
+export const updateSupplier = async (id: string, supplier: UpdateSupplierRequest): Promise<Supplier> => {
+  const response = (await fetchApi<Supplier>(`/suppliers/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(supplier),
+  })) as ApiResponse<Supplier>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to update supplier")
+}
+
+export const deleteSupplier = async (id: string): Promise<void> => {
+  const response = (await fetchApi<null>(`/suppliers/${id}`, {
+    method: "DELETE",
+  })) as ApiResponse<null>
+  if (!response.success) {
+    throw new Error(response.error || "Failed to delete supplier")
+  }
+}
+
+// Tags API
+export const getTags = async (): Promise<Tag[]> => {
+  const response = (await fetchApi<Tag[]>("/tags")) as ApiResponse<Tag[]>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to fetch tags")
+}
+
+export const createTag = async (tag: Omit<Tag, "id">): Promise<Tag> => {
+  const response = (await fetchApi<Tag>("/tags", {
+    method: "POST",
+    body: JSON.stringify(tag),
+  })) as ApiResponse<Tag>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to create tag")
+}

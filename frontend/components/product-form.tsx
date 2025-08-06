@@ -1,6 +1,7 @@
 "use client"
 
 import * as React from "react"
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -8,7 +9,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { toast } from "@/components/ui/use-toast"
-import { Shirt, Hash, Calculator } from "lucide-react"
+import { Shirt, Hash, Calculator, Loader2 } from "lucide-react"
+import { useProductsStore } from "@/stores/products-store"
+import { useCategoriesStore } from "@/stores/categories-store"
+import { useSuppliersStore } from "@/stores/suppliers-store"
+import type { CreateProductRequest } from "@/lib/api"
 
 interface ProductFormProps {
   onSubmit?: (product: any) => void
@@ -17,43 +22,38 @@ interface ProductFormProps {
 }
 
 export function ProductForm({ onSubmit, initialData, isEditing = false }: ProductFormProps) {
+  const router = useRouter()
+  const { createProduct, updateProduct, isLoading: productLoading } = useProductsStore()
+  const { categories, fetchCategories, isLoading: categoriesLoading } = useCategoriesStore()
+  const { suppliers, fetchSuppliers, isLoading: suppliersLoading } = useSuppliersStore()
+
   const [formData, setFormData] = React.useState({
     name: initialData?.name || "",
     description: initialData?.description || "",
     sku: initialData?.sku || "",
-    category: initialData?.category || "",
-    price: initialData?.price || "",
-    cost: initialData?.cost || "",
-    stock: initialData?.stock || "",
-    minStock: initialData?.minStock || "",
-    taxRate: initialData?.taxRate || "21",
+    categoryId: initialData?.categoryId || "",
+    price: initialData?.price?.toString() || "",
+    cost: initialData?.cost?.toString() || "",
+    stock: initialData?.stock?.toString() || "",
+    minStock: initialData?.minStock?.toString() || "",
+    maxStock: initialData?.maxStock?.toString() || "",
+    ivaRate: initialData?.ivaRate?.toString() || "21",
     barcode: initialData?.barcode || "",
-    supplier: initialData?.supplier || "",
-    tags: initialData?.tags || "" as string,
+    supplierId: initialData?.supplierId || "",
     size: initialData?.size || "",
     color: initialData?.color || "",
     material: initialData?.material || "",
     brand: initialData?.brand || "",
+    unit: initialData?.unit || "unidad",
   })
 
   const [errors, setErrors] = React.useState<Record<string, string>>({})
 
-  const categories = [
-    "Vestidos",
-    "Blusas",
-    "Pantalones",
-    "Faldas",
-    "Chaquetas",
-    "Calzado",
-    "Accesorios",
-    "Ropa Interior",
-    "Camisas",
-    "Sweaters",
-    "Jeans",
-    "Shorts",
-    "Trajes",
-    "Ropa Deportiva",
-  ]
+  // Cargar categorías y proveedores usando los stores
+  React.useEffect(() => {
+    fetchCategories()
+    fetchSuppliers()
+  }, [fetchCategories, fetchSuppliers])
 
   const sizes = ["XS", "S", "M", "L", "XL", "XXL", "34", "36", "38", "40", "42", "44", "46", "48"]
 
@@ -96,6 +96,8 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
     { value: "27", label: "27% - IVA Aumentado" },
   ]
 
+  const units = ["unidad", "par", "conjunto", "metro", "kilogramo", "gramo", "litro", "mililitro"]
+
   const handleInputChange = (field: string, value: string) => {
     setFormData((prev) => ({ ...prev, [field]: value }))
     if (errors[field]) {
@@ -114,7 +116,7 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
       newErrors.price = "El precio debe ser mayor a 0"
     }
 
-    if (!formData.cost || Number.parseFloat(formData.cost) < 0) {
+    if (formData.cost && Number.parseFloat(formData.cost) < 0) {
       newErrors.cost = "El costo no puede ser negativo"
     }
 
@@ -126,8 +128,8 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
       newErrors.minStock = "El stock mínimo no puede ser negativo"
     }
 
-    if (!formData.category) {
-      newErrors.category = "Seleccione una categoría"
+    if (!formData.categoryId) {
+      newErrors.categoryId = "Seleccione una categoría"
     }
 
     setErrors(newErrors)
@@ -135,7 +137,8 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
   }
 
   const generateSKU = () => {
-    const prefix = formData.category.substring(0, 3).toUpperCase()
+    const category = categories.find((c) => c.id === formData.categoryId)
+    const prefix = category?.name.substring(0, 3).toUpperCase() || "PRD"
     const sizeCode = formData.size ? `-${formData.size}` : ""
     const colorCode = formData.color ? `-${formData.color.substring(0, 2).toUpperCase()}` : ""
     const random = Math.floor(Math.random() * 1000)
@@ -156,11 +159,11 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
 
   const calculatePriceWithTax = () => {
     const price = Number.parseFloat(formData.price) || 0
-    const taxRate = Number.parseFloat(formData.taxRate) || 0
+    const taxRate = Number.parseFloat(formData.ivaRate) || 0
     return (price * (1 + taxRate / 100)).toFixed(2)
   }
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
 
     if (!validateForm()) {
@@ -172,50 +175,79 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
       return
     }
 
-    const productData = {
-      ...formData,
-      price: Number.parseFloat(formData.price),
-      cost: Number.parseFloat(formData.cost),
-      stock: Number.parseInt(formData.stock),
-      minStock: Number.parseInt(formData.minStock),
-      taxRate: Number.parseFloat(formData.taxRate),
-      tags: formData.tags
-        .split(",")
-        .map((tag: string) => tag.trim())
-        .filter(Boolean),
-      margin: Number.parseFloat(calculateMargin()),
-      priceWithTax: Number.parseFloat(calculatePriceWithTax()),
-      createdAt: initialData?.createdAt || new Date(),
-      updatedAt: new Date(),
+    try {
+      const productData: CreateProductRequest = {
+        name: formData.name,
+        description: formData.description || undefined,
+        price: Number.parseFloat(formData.price),
+        cost: formData.cost ? Number.parseFloat(formData.cost) : undefined,
+        stock: Number.parseInt(formData.stock),
+        minStock: Number.parseInt(formData.minStock),
+        maxStock: formData.maxStock ? Number.parseInt(formData.maxStock) : undefined,
+        sku: formData.sku || undefined,
+        barcode: formData.barcode || undefined,
+        brand: formData.brand || undefined,
+        color: formData.color || undefined,
+        size: formData.size || undefined,
+        material: formData.material || undefined,
+        unit: formData.unit,
+        ivaRate: Number.parseFloat(formData.ivaRate),
+        categoryId: formData.categoryId,
+        supplierId: formData.supplierId || undefined,
+      }
+
+      if (isEditing && initialData?.id) {
+        await updateProduct(initialData.id, productData)
+      } else {
+        await createProduct(productData)
+      }
+
+      // Si hay un callback personalizado, lo ejecutamos
+      if (onSubmit) {
+        onSubmit(productData)
+      } else {
+        // Si no hay callback, redirigimos a la lista de productos
+        router.push("/productos")
+      }
+
+      // Limpiar formulario solo si estamos creando un nuevo producto
+      if (!isEditing) {
+        setFormData({
+          name: "",
+          description: "",
+          sku: "",
+          categoryId: "",
+          price: "",
+          cost: "",
+          stock: "",
+          minStock: "",
+          maxStock: "",
+          ivaRate: "21",
+          barcode: "",
+          supplierId: "",
+          size: "",
+          color: "",
+          material: "",
+          brand: "",
+          unit: "unidad",
+        })
+      }
+    } catch (error) {
+      // El error ya se maneja en el store con toast
+      console.error("Error submitting product:", error)
     }
+  }
 
-    onSubmit?.(productData)
+  const overallLoading = productLoading || categoriesLoading || suppliersLoading
 
-    toast({
-      title: isEditing ? "Artículo actualizado" : "Artículo creado",
-      description: `${productData.name} ha sido ${isEditing ? "actualizado" : "agregado"} correctamente`,
-    })
-
-    if (!isEditing) {
-      setFormData({
-        name: "",
-        description: "",
-        sku: "",
-        category: "",
-        price: "",
-        cost: "",
-        stock: "",
-        minStock: "",
-        taxRate: "21",
-        barcode: "",
-        supplier: "",
-        tags: "",
-        size: "",
-        color: "",
-        material: "",
-        brand: "",
-      })
-    }
+  if (overallLoading && !isEditing) {
+    // Only show full loading spinner on initial load for new product form
+    return (
+      <div className="flex items-center justify-center p-8">
+        <Loader2 className="h-8 w-8 animate-spin" />
+        <span className="ml-2">Cargando datos...</span>
+      </div>
+    )
   }
 
   return (
@@ -282,20 +314,30 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="category">Categoría *</Label>
-              <Select value={formData.category} onValueChange={(value) => handleInputChange("category", value)}>
-                <SelectTrigger className={errors.category ? "border-red-500" : ""}>
+              <Label htmlFor="categoryId">Categoría *</Label>
+              <Select value={formData.categoryId} onValueChange={(value) => handleInputChange("categoryId", value)}>
+                <SelectTrigger className={errors.categoryId ? "border-red-500" : ""}>
                   <SelectValue placeholder="Seleccionar categoría" />
                 </SelectTrigger>
                 <SelectContent>
-                  {categories.map((category) => (
-                    <SelectItem key={category} value={category}>
-                      {category}
+                  {categoriesLoading ? (
+                    <SelectItem value="" disabled>
+                      Cargando categorías...
                     </SelectItem>
-                  ))}
+                  ) : categories.length === 0 ? (
+                    <SelectItem value="" disabled>
+                      No hay categorías disponibles
+                    </SelectItem>
+                  ) : (
+                    categories.map((category) => (
+                      <SelectItem key={category.id} value={category.id}>
+                        {category.name}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
-              {errors.category && <p className="text-sm text-red-500">{errors.category}</p>}
+              {errors.categoryId && <p className="text-sm text-red-500">{errors.categoryId}</p>}
             </div>
 
             <div className="space-y-2">
@@ -309,13 +351,45 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="supplier">Proveedor</Label>
-              <Input
-                id="supplier"
-                value={formData.supplier}
-                onChange={(e) => handleInputChange("supplier", e.target.value)}
-                placeholder="Nombre del proveedor"
-              />
+              <Label htmlFor="supplierId">Proveedor</Label>
+              <Select value={formData.supplierId} onValueChange={(value) => handleInputChange("supplierId", value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar proveedor" />
+                </SelectTrigger>
+                <SelectContent>
+                  {suppliersLoading ? (
+                    <SelectItem value="" disabled>
+                      Cargando proveedores...
+                    </SelectItem>
+                  ) : suppliers.length === 0 ? (
+                    <SelectItem value="" disabled>
+                      No hay proveedores disponibles
+                    </SelectItem>
+                  ) : (
+                    suppliers.map((supplier) => (
+                      <SelectItem key={supplier.id} value={supplier.id}>
+                        {supplier.name}
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="unit">Unidad de Medida</Label>
+              <Select value={formData.unit} onValueChange={(value) => handleInputChange("unit", value)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Seleccionar unidad" />
+                </SelectTrigger>
+                <SelectContent>
+                  {units.map((unit) => (
+                    <SelectItem key={unit} value={unit}>
+                      {unit}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </CardContent>
         </Card>
@@ -379,7 +453,7 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="cost">Costo *</Label>
+                <Label htmlFor="cost">Costo</Label>
                 <div className="relative">
                   <span className="absolute left-3 top-1/2 transform -translate-y-1/2 text-muted-foreground">$</span>
                   <Input
@@ -414,8 +488,8 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="taxRate">Alícuota IVA</Label>
-              <Select value={formData.taxRate} onValueChange={(value) => handleInputChange("taxRate", value)}>
+              <Label htmlFor="ivaRate">Alícuota IVA</Label>
+              <Select value={formData.ivaRate} onValueChange={(value) => handleInputChange("ivaRate", value)}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -429,7 +503,7 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
               </Select>
             </div>
 
-            <div className="grid grid-cols-2 gap-4">
+            <div className="grid grid-cols-3 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="stock">Stock Actual *</Label>
                 <Input
@@ -455,17 +529,17 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
                 />
                 {errors.minStock && <p className="text-sm text-red-500">{errors.minStock}</p>}
               </div>
-            </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="tags">Etiquetas</Label>
-              <Input
-                id="tags"
-                value={formData.tags}
-                onChange={(e) => handleInputChange("tags", e.target.value)}
-                placeholder="casual, elegante, verano"
-              />
-              <p className="text-xs text-muted-foreground">Separar con comas</p>
+              <div className="space-y-2">
+                <Label htmlFor="maxStock">Stock Máximo</Label>
+                <Input
+                  id="maxStock"
+                  type="number"
+                  value={formData.maxStock}
+                  onChange={(e) => handleInputChange("maxStock", e.target.value)}
+                  placeholder="0"
+                />
+              </div>
             </div>
           </CardContent>
         </Card>
@@ -503,10 +577,13 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
 
       {/* Botones de acción */}
       <div className="flex justify-end gap-4">
-        <Button type="button" variant="outline">
+        <Button type="button" variant="outline" onClick={() => router.back()}>
           Cancelar
         </Button>
-        <Button type="submit">{isEditing ? "Actualizar Artículo" : "Crear Artículo"}</Button>
+        <Button type="submit" disabled={productLoading}>
+          {productLoading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+          {isEditing ? "Actualizar Artículo" : "Crear Artículo"}
+        </Button>
       </div>
     </form>
   )

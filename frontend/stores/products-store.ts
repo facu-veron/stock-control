@@ -1,148 +1,178 @@
 import { create } from "zustand"
-import { apiClient, type Product, type CreateProductRequest, type UpdateProductRequest } from "@/lib/api"
+import { devtools } from "zustand/middleware"
+import { toast } from "@/components/ui/use-toast"
+import {
+  getProducts,
+  getProductById,
+  createProduct,
+  updateProduct,
+  deleteProduct,
+  type Product,
+  type CreateProductRequest,
+  type UpdateProductRequest,
+  type PaginatedResponse,
+} from "@/lib/api"
 
 interface ProductsState {
   products: Product[]
-  isLoading: boolean
-  error: string | null
   pagination: {
     page: number
     limit: number
     total: number
     pages: number
   }
-  filters: {
-    search: string
-    category: string
-  }
+  isLoading: boolean
+  error: string | null
 }
 
 interface ProductsActions {
   fetchProducts: (params?: {
-    search?: string
-    category?: string
     page?: number
     limit?: number
+    search?: string
+    supplierId?: string
+    brand?: string
   }) => Promise<void>
-  createProduct: (product: CreateProductRequest) => Promise<Product>
-  updateProduct: (id: string, product: UpdateProductRequest) => Promise<Product>
+  fetchProductById: (id: string) => Promise<Product | null>
+  createProduct: (data: CreateProductRequest) => Promise<void>
+  updateProduct: (id: string, data: UpdateProductRequest) => Promise<void>
   deleteProduct: (id: string) => Promise<void>
-  setFilters: (filters: Partial<ProductsState["filters"]>) => void
   clearError: () => void
 }
 
 type ProductsStore = ProductsState & ProductsActions
 
-export const useProductsStore = create<ProductsStore>((set, get) => ({
-  // State
-  products: [],
-  isLoading: false,
-  error: null,
-  pagination: {
-    page: 1,
-    limit: 10,
-    total: 0,
-    pages: 0,
-  },
-  filters: {
-    search: "",
-    category: "",
-  },
+export const useProductsStore = create<ProductsStore>()(
+  devtools(
+    (set, get) => ({
+      // Estado inicial
+      products: [],
+      pagination: {
+        page: 1,
+        limit: 10,
+        total: 0,
+        pages: 0,
+      },
+      isLoading: false,
+      error: null,
 
-  // Actions
-  fetchProducts: async (params) => {
-    set({ isLoading: true, error: null })
+      // Acciones
+      fetchProducts: async (params) => {
+        set({ isLoading: true, error: null })
+        try {
+          const response: PaginatedResponse<Product> = await getProducts(params)
+          set({
+            products: response.data,
+            pagination: response.pagination,
+            isLoading: false,
+          })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Error al cargar productos"
+          set({ error: errorMessage, isLoading: false })
+          toast({
+            title: "Error",
+            description: errorMessage,
+            variant: "destructive",
+          })
+        }
+      },
 
-    try {
-      const response = await apiClient.getProducts(params)
+      fetchProductById: async (id: string) => {
+        set({ isLoading: true, error: null })
+        try {
+          const product = await getProductById(id)
+          set({ isLoading: false })
+          return product
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Error al cargar el producto"
+          set({ error: errorMessage, isLoading: false })
+          toast({
+            title: "Error",
+            description: errorMessage,
+            variant: "destructive",
+          })
+          return null
+        }
+      },
 
-      if (response.success && response.data) {
-        const { products, pagination } = response.data
-        set({
-          products,
-          pagination: pagination || get().pagination,
-          isLoading: false,
-        })
-      } else {
-        throw new Error(response.error || "Failed to fetch products")
-      }
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : "Failed to fetch products",
-        isLoading: false,
-      })
-    }
-  },
+      createProduct: async (data) => {
+        set({ isLoading: true, error: null })
+        try {
+          const newProduct = await createProduct(data)
+          set((state) => ({
+            products: [...state.products, newProduct],
+            isLoading: false,
+          }))
+          toast({
+            title: "Producto creado",
+            description: `El producto "${data.name}" ha sido creado exitosamente.`,
+          })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Error al crear producto"
+          set({ error: errorMessage, isLoading: false })
+          toast({
+            title: "Error al crear producto",
+            description: errorMessage,
+            variant: "destructive",
+          })
+          throw error
+        }
+      },
 
-  createProduct: async (productData: CreateProductRequest) => {
-    set({ error: null })
+      updateProduct: async (id, data) => {
+        set({ isLoading: true, error: null })
+        try {
+          const updatedProduct = await updateProduct(id, data)
+          set((state) => ({
+            products: state.products.map((p) => (p.id === id ? updatedProduct : p)),
+            isLoading: false,
+          }))
+          toast({
+            title: "Producto actualizado",
+            description: `El producto "${updatedProduct.name}" ha sido actualizado correctamente.`,
+          })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Error al actualizar producto"
+          set({ error: errorMessage, isLoading: false })
+          toast({
+            title: "Error al actualizar",
+            description: errorMessage,
+            variant: "destructive",
+          })
+          throw error
+        }
+      },
 
-    try {
-      const response = await apiClient.createProduct(productData)
+      deleteProduct: async (id) => {
+        set({ isLoading: true, error: null })
+        try {
+          await deleteProduct(id)
+          set((state) => ({
+            products: state.products.filter((p) => p.id !== id),
+            isLoading: false,
+          }))
+          toast({
+            title: "Producto eliminado",
+            description: "El producto ha sido eliminado correctamente.",
+          })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Error al eliminar producto"
+          set({ error: errorMessage, isLoading: false })
+          toast({
+            title: "Error al eliminar",
+            description: errorMessage,
+            variant: "destructive",
+          })
+          throw error
+        }
+      },
 
-      if (response.success && response.data) {
-        const newProduct = response.data
-        set((state) => ({
-          products: [...state.products, newProduct],
-        }))
-        return newProduct
-      } else {
-        throw new Error(response.error || "Failed to create product")
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to create product"
-      set({ error: errorMessage })
-      throw error
-    }
-  },
-
-  updateProduct: async (id: string, productData: UpdateProductRequest) => {
-    set({ error: null })
-
-    try {
-      const response = await apiClient.updateProduct(id, productData)
-
-      if (response.success && response.data) {
-        const updatedProduct = response.data
-        set((state) => ({
-          products: state.products.map((product) => (product.id === id ? updatedProduct : product)),
-        }))
-        return updatedProduct
-      } else {
-        throw new Error(response.error || "Failed to update product")
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to update product"
-      set({ error: errorMessage })
-      throw error
-    }
-  },
-
-  deleteProduct: async (id: string) => {
-    set({ error: null })
-
-    try {
-      const response = await apiClient.deleteProduct(id)
-
-      if (response.success) {
-        set((state) => ({
-          products: state.products.filter((product) => product.id !== id),
-        }))
-      } else {
-        throw new Error(response.error || "Failed to delete product")
-      }
-    } catch (error) {
-      const errorMessage = error instanceof Error ? error.message : "Failed to delete product"
-      set({ error: errorMessage })
-      throw error
-    }
-  },
-
-  setFilters: (newFilters: Partial<ProductsState["filters"]>) => {
-    set((state) => ({
-      filters: { ...state.filters, ...newFilters },
-    }))
-  },
-
-  clearError: () => set({ error: null }),
-}))
+      clearError: () => {
+        set({ error: null })
+      },
+    }),
+    {
+      name: "products-store",
+    },
+  ),
+)

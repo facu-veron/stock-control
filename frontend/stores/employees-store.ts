@@ -1,5 +1,16 @@
 import { create } from "zustand"
-import { apiClient, type User, type CreateEmployeeRequest, type UpdateEmployeeRequest } from "@/lib/api"
+import { devtools } from "zustand/middleware"
+import { toast } from "@/components/ui/use-toast"
+import {
+  getEmployees,
+  getEmployeeById,
+  createEmployee,
+  updateEmployee,
+  deleteEmployee,
+  type User, // Using User type for employees
+  type CreateEmployeeRequest,
+  type UpdateEmployeeRequest,
+} from "@/lib/api"
 
 interface EmployeesState {
   employees: User[]
@@ -9,129 +20,136 @@ interface EmployeesState {
 
 interface EmployeesActions {
   fetchEmployees: () => Promise<void>
-  createEmployee: (employee: CreateEmployeeRequest) => Promise<void>
-  updateEmployee: (id: string, employee: UpdateEmployeeRequest) => Promise<void>
+  fetchEmployeeById: (id: string) => Promise<User | null>
+  createEmployee: (data: CreateEmployeeRequest) => Promise<void>
+  updateEmployee: (id: string, data: UpdateEmployeeRequest) => Promise<void>
   deleteEmployee: (id: string) => Promise<void>
-  verifyPin: (pin: string) => Promise<User | null>
   clearError: () => void
 }
 
 type EmployeesStore = EmployeesState & EmployeesActions
 
-export const useEmployeesStore = create<EmployeesStore>((set, get) => ({
-  // State
-  employees: [],
-  isLoading: false,
-  error: null,
+export const useEmployeesStore = create<EmployeesStore>()(
+  devtools(
+    (set, get) => ({
+      // Estado inicial
+      employees: [],
+      isLoading: false,
+      error: null,
 
-  // Actions
-  fetchEmployees: async () => {
-    set({ isLoading: true, error: null })
+      // Acciones
+      fetchEmployees: async () => {
+        set({ isLoading: true, error: null })
+        try {
+          const data = await getEmployees()
+          set({ employees: data, isLoading: false })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Error al cargar empleados"
+          set({ error: errorMessage, isLoading: false })
+          toast({
+            title: "Error",
+            description: errorMessage,
+            variant: "destructive",
+          })
+        }
+      },
 
-    try {
-      const response = await apiClient.getEmployees()
+      fetchEmployeeById: async (id: string) => {
+        set({ isLoading: true, error: null })
+        try {
+          const employee = await getEmployeeById(id)
+          set({ isLoading: false })
+          return employee
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Error al cargar el empleado"
+          set({ error: errorMessage, isLoading: false })
+          toast({
+            title: "Error",
+            description: errorMessage,
+            variant: "destructive",
+          })
+          return null
+        }
+      },
 
-      if (response.success && response.data) {
-        set({
-          employees: response.data,
-          isLoading: false,
-        })
-      } else {
-        throw new Error(response.error || "Failed to fetch employees")
-      }
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : "Failed to fetch employees",
-        isLoading: false,
-      })
-    }
-  },
+      createEmployee: async (data) => {
+        set({ isLoading: true, error: null })
+        try {
+          const newEmployee = await createEmployee(data)
+          set((state) => ({
+            employees: [...state.employees, newEmployee],
+            isLoading: false,
+          }))
+          toast({
+            title: "Empleado creado",
+            description: `El empleado "${data.name}" ha sido creado exitosamente.`,
+          })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Error al crear empleado"
+          set({ error: errorMessage, isLoading: false })
+          toast({
+            title: "Error al crear empleado",
+            description: errorMessage,
+            variant: "destructive",
+          })
+          throw error
+        }
+      },
 
-  createEmployee: async (employee: CreateEmployeeRequest) => {
-    set({ isLoading: true, error: null })
+      updateEmployee: async (id, data) => {
+        set({ isLoading: true, error: null })
+        try {
+          const updatedEmployee = await updateEmployee(id, data)
+          set((state) => ({
+            employees: state.employees.map((e) => (e.id === id ? updatedEmployee : e)),
+            isLoading: false,
+          }))
+          toast({
+            title: "Empleado actualizado",
+            description: `El empleado "${updatedEmployee.name}" ha sido actualizado correctamente.`,
+          })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Error al actualizar empleado"
+          set({ error: errorMessage, isLoading: false })
+          toast({
+            title: "Error al actualizar",
+            description: errorMessage,
+            variant: "destructive",
+          })
+          throw error
+        }
+      },
 
-    try {
-      const response = await apiClient.createEmployee(employee)
+      deleteEmployee: async (id) => {
+        set({ isLoading: true, error: null })
+        try {
+          await deleteEmployee(id)
+          set((state) => ({
+            employees: state.employees.filter((e) => e.id !== id),
+            isLoading: false,
+          }))
+          toast({
+            title: "Empleado eliminado",
+            description: "El empleado ha sido eliminado correctamente.",
+          })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Error al eliminar empleado"
+          set({ error: errorMessage, isLoading: false })
+          toast({
+            title: "Error al eliminar",
+            description: errorMessage,
+            variant: "destructive",
+          })
+          throw error
+        }
+      },
 
-      if (response.success && response.data) {
-        set((state) => ({
-          employees: [...state.employees, response.data!],
-          isLoading: false,
-        }))
-      } else {
-        throw new Error(response.error || "Failed to create employee")
-      }
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : "Failed to create employee",
-        isLoading: false,
-      })
-      throw error
-    }
-  },
-
-  updateEmployee: async (id: string, employee: UpdateEmployeeRequest) => {
-    set({ isLoading: true, error: null })
-
-    try {
-      const response = await apiClient.updateEmployee(id, employee)
-
-      if (response.success && response.data) {
-        set((state) => ({
-          employees: state.employees.map((emp) => (emp.id === id ? response.data! : emp)),
-          isLoading: false,
-        }))
-      } else {
-        throw new Error(response.error || "Failed to update employee")
-      }
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : "Failed to update employee",
-        isLoading: false,
-      })
-      throw error
-    }
-  },
-
-  deleteEmployee: async (id: string) => {
-    set({ isLoading: true, error: null })
-
-    try {
-      const response = await apiClient.deleteEmployee(id)
-
-      if (response.success) {
-        set((state) => ({
-          employees: state.employees.filter((emp) => emp.id !== id),
-          isLoading: false,
-        }))
-      } else {
-        throw new Error(response.error || "Failed to delete employee")
-      }
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : "Failed to delete employee",
-        isLoading: false,
-      })
-      throw error
-    }
-  },
-
-  verifyPin: async (pin: string) => {
-    try {
-      const response = await apiClient.verifyEmployeePin(pin)
-
-      if (response.success && response.data) {
-        return response.data
-      } else {
-        throw new Error(response.error || "Invalid PIN")
-      }
-    } catch (error) {
-      set({
-        error: error instanceof Error ? error.message : "Invalid PIN",
-      })
-      return null
-    }
-  },
-
-  clearError: () => set({ error: null }),
-}))
+      clearError: () => {
+        set({ error: null })
+      },
+    }),
+    {
+      name: "employees-store",
+    },
+  ),
+)

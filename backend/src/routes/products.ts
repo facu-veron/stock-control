@@ -37,7 +37,15 @@ const validateProduct = [
     .withMessage("La categoría es requerida")
     .isString()
     .withMessage("ID de categoría inválido"),
+  body("supplierId").optional().isString().withMessage("ID de proveedor inválido"),
+  body("brand").optional().trim().isLength({ max: 100 }).withMessage("La marca no puede exceder 100 caracteres"),
+  body("color").optional().trim().isLength({ max: 50 }).withMessage("El color no puede exceder 50 caracteres"),
+  body("size").optional().trim().isLength({ max: 50 }).withMessage("El tamaño no puede exceder 50 caracteres"),
+  body("material").optional().trim().isLength({ max: 100 }).withMessage("El material no puede exceder 100 caracteres"),
+  body("ivaRate").optional().isFloat({ min: 0, max: 100 }).withMessage("La tasa de IVA debe estar entre 0 y 100"),
   body("active").optional().isBoolean().withMessage("El estado activo debe ser verdadero o falso"),
+  body("tags").optional().isArray().withMessage("Las etiquetas deben ser un array"),
+  body("tags.*").optional().isString().withMessage("Cada etiqueta debe ser un string"),
 ]
 
 interface ProductBody {
@@ -52,8 +60,15 @@ interface ProductBody {
   maxStock?: number
   unit?: string
   categoryId: string
+  supplierId?: string
   image?: string
+  brand?: string
+  color?: string
+  size?: string
+  material?: string
+  ivaRate?: number
   active?: boolean
+  tags?: string[]
 }
 
 interface StockUpdateBody {
@@ -61,7 +76,7 @@ interface StockUpdateBody {
   operation?: "set" | "add" | "subtract"
 }
 
-// GET /api/products - Obtener todos los productos
+// GET /api/products - Obtener todos los productos con filtros y paginación
 router.get("/", async (req: AuthenticatedRequest, res: Response): Promise<void> => {
   try {
     const {
@@ -69,10 +84,13 @@ router.get("/", async (req: AuthenticatedRequest, res: Response): Promise<void> 
       limit = "50",
       search = "",
       category = "",
+      supplier = "",
+      brand = "",
       active = "",
       sortBy = "name",
       sortOrder = "asc",
       lowStock = "false",
+      tags = "",
     } = req.query as Record<string, string>
 
     const skip = (Number.parseInt(page) - 1) * Number.parseInt(limit)
@@ -87,6 +105,7 @@ router.get("/", async (req: AuthenticatedRequest, res: Response): Promise<void> 
         { description: { contains: search, mode: "insensitive" } },
         { sku: { contains: search, mode: "insensitive" } },
         { barcode: { contains: search, mode: "insensitive" } },
+        { brand: { contains: search, mode: "insensitive" } },
       ]
     }
 
@@ -94,12 +113,36 @@ router.get("/", async (req: AuthenticatedRequest, res: Response): Promise<void> 
       where.categoryId = category
     }
 
+    if (supplier) {
+      where.supplierId = supplier
+    }
+
+    if (brand) {
+      where.brand = { contains: brand, mode: "insensitive" }
+    }
+
     if (active !== "") {
       where.active = active === "true"
     }
 
     if (lowStock === "true") {
-      where.stock = { lte: prisma.product.fields.minStock }
+      where.AND = [
+        ...(where.AND || []),
+        {
+          stock: {
+            lte: prisma.product.fields.minStock,
+          },
+        },
+      ]
+    }
+
+    if (tags) {
+      const tagArray = tags.split(",").map((tag) => tag.trim())
+      where.tags = {
+        some: {
+          name: { in: tagArray },
+        },
+      }
     }
 
     // Construir ordenamiento
@@ -115,6 +158,19 @@ router.get("/", async (req: AuthenticatedRequest, res: Response): Promise<void> 
               id: true,
               name: true,
               color: true,
+            },
+          },
+          supplier: {
+            select: {
+              id: true,
+              name: true,
+              contact: true,
+            },
+          },
+          tags: {
+            select: {
+              id: true,
+              name: true,
             },
           },
         },
@@ -157,6 +213,21 @@ router.get("/:id", async (req: AuthenticatedRequest, res: Response): Promise<voi
             id: true,
             name: true,
             color: true,
+          },
+        },
+        supplier: {
+          select: {
+            id: true,
+            name: true,
+            contact: true,
+            email: true,
+            phone: true,
+          },
+        },
+        tags: {
+          select: {
+            id: true,
+            name: true,
           },
         },
       },
@@ -213,8 +284,15 @@ router.post(
         maxStock,
         unit = "unidad",
         categoryId,
+        supplierId,
         image,
+        brand,
+        color,
+        size,
+        material,
+        ivaRate,
         active = true,
+        tags = [],
       }: ProductBody = req.body
 
       // Verificar que la categoría existe
@@ -230,6 +308,34 @@ router.post(
         return
       }
 
+      // Verificar que el proveedor existe (si se proporciona)
+      if (supplierId) {
+        const supplier = await prisma.supplier.findUnique({
+          where: { id: supplierId },
+        })
+
+        if (!supplier) {
+          res.status(400).json({
+            success: false,
+            error: "Proveedor no encontrado",
+          } as ApiResponse)
+          return
+        }
+      }
+
+      // Procesar tags - crear los que no existen
+      const tagConnections = []
+      if (tags && tags.length > 0) {
+        for (const tagName of tags) {
+          const tag = await prisma.tag.upsert({
+            where: { name: tagName },
+            update: {},
+            create: { name: tagName },
+          })
+          tagConnections.push({ id: tag.id })
+        }
+      }
+
       const product = await prisma.product.create({
         data: {
           name,
@@ -243,8 +349,17 @@ router.post(
           maxStock,
           unit,
           categoryId,
+          supplierId,
           image,
+          brand,
+          color,
+          size,
+          material,
+          ivaRate,
           active,
+          tags: {
+            connect: tagConnections,
+          },
         },
         include: {
           category: {
@@ -252,6 +367,19 @@ router.post(
               id: true,
               name: true,
               color: true,
+            },
+          },
+          supplier: {
+            select: {
+              id: true,
+              name: true,
+              contact: true,
+            },
+          },
+          tags: {
+            select: {
+              id: true,
+              name: true,
             },
           },
         },
@@ -303,8 +431,15 @@ router.put(
         maxStock,
         unit,
         categoryId,
+        supplierId,
         image,
+        brand,
+        color,
+        size,
+        material,
+        ivaRate,
         active,
+        tags = [],
       }: ProductBody = req.body
 
       // Verificar que la categoría existe
@@ -318,6 +453,34 @@ router.put(
           error: "Categoría no encontrada",
         } as ApiResponse)
         return
+      }
+
+      // Verificar que el proveedor existe (si se proporciona)
+      if (supplierId) {
+        const supplier = await prisma.supplier.findUnique({
+          where: { id: supplierId },
+        })
+
+        if (!supplier) {
+          res.status(400).json({
+            success: false,
+            error: "Proveedor no encontrado",
+          } as ApiResponse)
+          return
+        }
+      }
+
+      // Procesar tags - crear los que no existen
+      const tagConnections = []
+      if (tags && tags.length > 0) {
+        for (const tagName of tags) {
+          const tag = await prisma.tag.upsert({
+            where: { name: tagName },
+            update: {},
+            create: { name: tagName },
+          })
+          tagConnections.push({ id: tag.id })
+        }
       }
 
       const product = await prisma.product.update({
@@ -334,8 +497,18 @@ router.put(
           maxStock,
           unit,
           categoryId,
+          supplierId,
           image,
+          brand,
+          color,
+          size,
+          material,
+          ivaRate,
           active,
+          tags: {
+            set: [], // Desconectar todas las tags existentes
+            connect: tagConnections, // Conectar las nuevas tags
+          },
         },
         include: {
           category: {
@@ -343,6 +516,19 @@ router.put(
               id: true,
               name: true,
               color: true,
+            },
+          },
+          supplier: {
+            select: {
+              id: true,
+              name: true,
+              contact: true,
+            },
+          },
+          tags: {
+            select: {
+              id: true,
+              name: true,
             },
           },
         },
@@ -398,6 +584,19 @@ router.patch("/:id/stock", authenticateToken, async (req: AuthenticatedRequest, 
             color: true,
           },
         },
+        supplier: {
+          select: {
+            id: true,
+            name: true,
+            contact: true,
+          },
+        },
+        tags: {
+          select: {
+            id: true,
+            name: true,
+          },
+        },
       },
     })
 
@@ -447,8 +646,14 @@ router.get("/reports/low-stock", authenticateToken, async (req: AuthenticatedReq
   try {
     const products = await prisma.product.findMany({
       where: {
-        stock: { lte: prisma.product.fields.minStock },
-        active: true,
+        AND: [
+          { active: true },
+          {
+            stock: {
+              lte: prisma.product.fields.minStock,
+            },
+          },
+        ],
       },
       include: {
         category: {
@@ -456,6 +661,19 @@ router.get("/reports/low-stock", authenticateToken, async (req: AuthenticatedReq
             id: true,
             name: true,
             color: true,
+          },
+        },
+        supplier: {
+          select: {
+            id: true,
+            name: true,
+            contact: true,
+          },
+        },
+        tags: {
+          select: {
+            id: true,
+            name: true,
           },
         },
       },

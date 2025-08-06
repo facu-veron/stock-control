@@ -33,147 +33,41 @@ import { toast } from "@/components/ui/use-toast"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { ExcelImportExport } from "@/components/excel-import-export"
-
-export type Product = {
-  id: string
-  name: string
-  description?: string
-  sku: string
-  category: string
-  price: number
-  cost: number
-  stock: number
-  minStock: number
-  taxRate: number
-  barcode?: string
-  supplier?: string
-  tags?: string[]
-  margin: number
-  priceWithTax: number
-  createdAt: Date
-  updatedAt: Date
-  status: "active" | "inactive" | "discontinued"
-}
-
-// Datos de ejemplo
-const sampleProducts: Product[] = [
-  {
-    id: "1",
-    name: "Smartphone Samsung Galaxy A54",
-    description: "Smartphone con pantalla de 6.4 pulgadas, 128GB de almacenamiento",
-    sku: "ELE-0001",
-    category: "Electrónicos",
-    price: 299999,
-    cost: 220000,
-    stock: 15,
-    minStock: 5,
-    taxRate: 21,
-    barcode: "7798123456789",
-    supplier: "Samsung Argentina",
-    tags: ["smartphone", "android", "samsung"],
-    margin: 36.4,
-    priceWithTax: 362999,
-    createdAt: new Date("2024-01-15"),
-    updatedAt: new Date("2024-01-20"),
-    status: "active",
-  },
-  {
-    id: "2",
-    name: "Notebook Lenovo ThinkPad E14",
-    description: "Notebook empresarial con procesador Intel i5, 8GB RAM, 256GB SSD",
-    sku: "ELE-0002",
-    category: "Electrónicos",
-    price: 899999,
-    cost: 650000,
-    stock: 8,
-    minStock: 3,
-    taxRate: 21,
-    barcode: "7798987654321",
-    supplier: "Lenovo Argentina",
-    tags: ["notebook", "laptop", "lenovo", "business"],
-    margin: 38.5,
-    priceWithTax: 1088999,
-    createdAt: new Date("2024-01-10"),
-    updatedAt: new Date("2024-01-18"),
-    status: "active",
-  },
-  {
-    id: "3",
-    name: "Auriculares Sony WH-1000XM4",
-    description: "Auriculares inalámbricos con cancelación de ruido",
-    sku: "ELE-0003",
-    category: "Electrónicos",
-    price: 189999,
-    cost: 140000,
-    stock: 2,
-    minStock: 5,
-    taxRate: 21,
-    barcode: "7798456123789",
-    supplier: "Sony Argentina",
-    tags: ["auriculares", "wireless", "sony", "noise-cancelling"],
-    margin: 35.7,
-    priceWithTax: 229999,
-    createdAt: new Date("2024-01-12"),
-    updatedAt: new Date("2024-01-22"),
-    status: "active",
-  },
-  {
-    id: "4",
-    name: "Remera Básica Algodón",
-    description: "Remera de algodón 100%, disponible en varios colores",
-    sku: "ROP-0001",
-    category: "Ropa y Accesorios",
-    price: 8999,
-    cost: 5500,
-    stock: 50,
-    minStock: 20,
-    taxRate: 21,
-    barcode: "7798111222333",
-    supplier: "Textil San Juan",
-    tags: ["remera", "algodón", "básica"],
-    margin: 63.6,
-    priceWithTax: 10889,
-    createdAt: new Date("2024-01-08"),
-    updatedAt: new Date("2024-01-15"),
-    status: "active",
-  },
-  {
-    id: "5",
-    name: "Cafetera Philips HD7447",
-    description: "Cafetera de filtro para 10-15 tazas",
-    sku: "HOG-0001",
-    category: "Hogar y Jardín",
-    price: 45999,
-    cost: 32000,
-    stock: 12,
-    minStock: 8,
-    taxRate: 21,
-    barcode: "7798555666777",
-    supplier: "Philips Argentina",
-    tags: ["cafetera", "philips", "hogar"],
-    margin: 43.7,
-    priceWithTax: 55659,
-    createdAt: new Date("2024-01-05"),
-    updatedAt: new Date("2024-01-19"),
-    status: "active",
-  },
-]
+import { useProductsStore } from "@/stores/products-store"
+import type { Product } from "@/lib/api"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 
 interface ProductsTableProps {
-  data?: Product[]
   onEdit?: (product: Product) => void
   onDelete?: (productId: string) => void
   onView?: (product: Product) => void
 }
 
-export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView }: ProductsTableProps) {
+export function ProductsTable({ onEdit, onDelete, onView }: ProductsTableProps) {
+  const { products, isLoading, error, fetchProducts, deleteProduct } = useProductsStore()
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
   const [rowSelection, setRowSelection] = React.useState({})
   const [globalFilter, setGlobalFilter] = React.useState("")
   const [categoryFilter, setCategoryFilter] = React.useState<string>("all")
-  const [statusFilter, setStatusFilter] = React.useState<string>("all")
+  const [supplierFilter, setSupplierFilter] = React.useState<string>("all")
+  const [brandFilter, setBrandFilter] = React.useState<string>("all")
+
+  // Cargar productos al montar el componente
+  React.useEffect(() => {
+    fetchProducts()
+  }, [fetchProducts])
 
   const columns: ColumnDef<Product>[] = [
     {
@@ -211,6 +105,7 @@ export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView 
           <div className="space-y-1">
             <div className="font-medium">{product.name}</div>
             <div className="text-sm text-muted-foreground">{product.sku}</div>
+            {product.brand && <div className="text-xs text-muted-foreground">Marca: {product.brand}</div>}
             {product.description && (
               <div className="text-xs text-muted-foreground max-w-[200px] truncate">{product.description}</div>
             )}
@@ -221,7 +116,29 @@ export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView 
     {
       accessorKey: "category",
       header: "Categoría",
-      cell: ({ row }) => <Badge variant="outline">{row.getValue("category")}</Badge>,
+      cell: ({ row }) => {
+        const category = row.original.category
+        return (
+          <Badge variant="outline" style={{ backgroundColor: category?.color + "20", borderColor: category?.color }}>
+            {category?.name}
+          </Badge>
+        )
+      },
+    },
+    {
+      accessorKey: "supplier",
+      header: "Proveedor",
+      cell: ({ row }) => {
+        const supplier = row.original.supplier
+        return supplier ? (
+          <div className="space-y-1">
+            <div className="text-sm font-medium">{supplier.name}</div>
+            {supplier.contact && <div className="text-xs text-muted-foreground">{supplier.contact}</div>}
+          </div>
+        ) : (
+          <span className="text-muted-foreground">Sin proveedor</span>
+        )
+      },
     },
     {
       accessorKey: "price",
@@ -234,8 +151,9 @@ export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView 
         )
       },
       cell: ({ row }) => {
-        const price = Number.parseFloat(row.getValue("price"))
-        const priceWithTax = row.original.priceWithTax
+        const price = row.original.price
+        const ivaRate = row.original.ivaRate || 21
+        const priceWithTax = price * (1 + ivaRate / 100)
         return (
           <div className="text-right space-y-1">
             <div className="font-medium">${price.toLocaleString("es-AR")}</div>
@@ -248,22 +166,8 @@ export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView 
       accessorKey: "cost",
       header: "Costo",
       cell: ({ row }) => {
-        const cost = Number.parseFloat(row.getValue("cost"))
+        const cost = row.original.cost || 0
         return <div className="text-right">${cost.toLocaleString("es-AR")}</div>
-      },
-    },
-    {
-      accessorKey: "margin",
-      header: "Margen",
-      cell: ({ row }) => {
-        const margin = row.getValue("margin") as number
-        return (
-          <div className="text-right">
-            <Badge variant={margin > 30 ? "default" : margin > 15 ? "secondary" : "destructive"}>
-              {margin.toFixed(1)}%
-            </Badge>
-          </div>
-        )
       },
     },
     {
@@ -277,7 +181,7 @@ export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView 
         )
       },
       cell: ({ row }) => {
-        const stock = row.getValue("stock") as number
+        const stock = row.original.stock
         const minStock = row.original.minStock
         const isLowStock = stock <= minStock
 
@@ -295,25 +199,46 @@ export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView 
       },
     },
     {
-      accessorKey: "status",
-      header: "Estado",
+      accessorKey: "details",
+      header: "Detalles",
       cell: ({ row }) => {
-        const status = row.getValue("status") as string
-        const statusConfig = {
-          active: { label: "Activo", variant: "default" as const },
-          inactive: { label: "Inactivo", variant: "secondary" as const },
-          discontinued: { label: "Descontinuado", variant: "destructive" as const },
-        }
-        const config = statusConfig[status as keyof typeof statusConfig]
-        return <Badge variant={config.variant}>{config.label}</Badge>
+        const product = row.original
+        return (
+          <div className="space-y-1 text-xs">
+            {product.color && <div>Color: {product.color}</div>}
+            {product.size && <div>Talla: {product.size}</div>}
+            {product.material && <div>Material: {product.material}</div>}
+          </div>
+        )
       },
     },
     {
-      accessorKey: "updatedAt",
-      header: "Actualizado",
+      accessorKey: "tags",
+      header: "Etiquetas",
       cell: ({ row }) => {
-        const date = row.getValue("updatedAt") as Date
-        return <div className="text-sm">{date.toLocaleDateString()}</div>
+        const tags = row.original.tags || []
+        return (
+          <div className="flex flex-wrap gap-1">
+            {tags.slice(0, 2).map((tag) => (
+              <Badge key={tag.id} variant="secondary" className="text-xs">
+                {tag.name}
+              </Badge>
+            ))}
+            {tags.length > 2 && (
+              <Badge variant="outline" className="text-xs">
+                +{tags.length - 2}
+              </Badge>
+            )}
+          </div>
+        )
+      },
+    },
+    {
+      accessorKey: "active",
+      header: "Estado",
+      cell: ({ row }) => {
+        const active = row.original.active
+        return <Badge variant={active ? "default" : "secondary"}>{active ? "Activo" : "Inactivo"}</Badge>
       },
     },
     {
@@ -321,6 +246,22 @@ export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView 
       enableHiding: false,
       cell: ({ row }) => {
         const product = row.original
+
+        const handleDelete = async () => {
+          try {
+            await deleteProduct(product.id)
+            toast({
+              title: "Producto eliminado",
+              description: `El producto "${product.name}" ha sido eliminado correctamente.`,
+            })
+          } catch (err) {
+            toast({
+              title: "Error al eliminar",
+              description: `No se pudo eliminar el producto. ${err instanceof Error ? err.message : ""}`,
+              variant: "destructive",
+            })
+          }
+        }
 
         return (
           <DropdownMenu>
@@ -342,10 +283,32 @@ export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView 
                 <Edit className="mr-2 h-4 w-4" />
                 Editar
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onDelete?.(product.id)} className="text-red-600">
-                <Trash2 className="mr-2 h-4 w-4" />
-                Eliminar
-              </DropdownMenuItem>
+              <AlertDialog>
+                <AlertDialogTrigger asChild>
+                  <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="text-red-600">
+                    <Trash2 className="mr-2 h-4 w-4" />
+                    Eliminar
+                  </DropdownMenuItem>
+                </AlertDialogTrigger>
+                <AlertDialogContent>
+                  <AlertDialogHeader>
+                    <AlertDialogTitle>¿Estás absolutamente seguro?</AlertDialogTitle>
+                    <AlertDialogDescription>
+                      Esta acción no se puede deshacer. Se eliminará permanentemente el producto
+                      <span className="font-semibold"> "{product.name}"</span>.
+                    </AlertDialogDescription>
+                  </AlertDialogHeader>
+                  <AlertDialogFooter>
+                    <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                    <AlertDialogAction
+                      onClick={handleDelete}
+                      className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                    >
+                      Sí, eliminar
+                    </AlertDialogAction>
+                  </AlertDialogFooter>
+                </AlertDialogContent>
+              </AlertDialog>
             </DropdownMenuContent>
           </DropdownMenu>
         )
@@ -355,19 +318,21 @@ export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView 
 
   // Filtrar datos
   const filteredData = React.useMemo(() => {
-    return data.filter((product) => {
+    return products.filter((product) => {
       const matchesGlobal =
         globalFilter === "" ||
         product.name.toLowerCase().includes(globalFilter.toLowerCase()) ||
-        product.sku.toLowerCase().includes(globalFilter.toLowerCase()) ||
+        product.sku?.toLowerCase().includes(globalFilter.toLowerCase()) ||
+        product.brand?.toLowerCase().includes(globalFilter.toLowerCase()) ||
         product.description?.toLowerCase().includes(globalFilter.toLowerCase())
 
-      const matchesCategory = categoryFilter === "all" || product.category === categoryFilter
-      const matchesStatus = statusFilter === "all" || product.status === statusFilter
+      const matchesCategory = categoryFilter === "all" || product.category?.name === categoryFilter
+      const matchesSupplier = supplierFilter === "all" || product.supplier?.name === supplierFilter
+      const matchesBrand = brandFilter === "all" || product.brand === brandFilter
 
-      return matchesGlobal && matchesCategory && matchesStatus
+      return matchesGlobal && matchesCategory && matchesSupplier && matchesBrand
     })
-  }, [data, globalFilter, categoryFilter, statusFilter])
+  }, [products, globalFilter, categoryFilter, supplierFilter, brandFilter])
 
   const table = useReactTable({
     data: filteredData,
@@ -388,7 +353,9 @@ export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView 
     },
   })
 
-  const categories = Array.from(new Set(data.map((product) => product.category)))
+  const categories = Array.from(new Set(products.map((product) => product.category?.name).filter(Boolean)))
+  const suppliers = Array.from(new Set(products.map((product) => product.supplier?.name).filter(Boolean)))
+  const brands = Array.from(new Set(products.map((product) => product.brand).filter(Boolean)))
 
   const handleExportToExcel = () => {
     const selectedRows = table.getFilteredSelectedRowModel().rows
@@ -397,22 +364,24 @@ export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView 
     // Preparar datos para Excel
     const excelData = dataToExport.map((product) => ({
       Nombre: product.name,
-      SKU: product.sku,
-      Categoría: product.category,
+      SKU: product.sku || "",
+      Marca: product.brand || "",
+      Categoría: product.category?.name || "",
+      Proveedor: product.supplier?.name || "",
       Precio: product.price,
-      "Precio con IVA": product.priceWithTax,
-      Costo: product.cost,
-      "Margen %": product.margin,
+      Costo: product.cost || 0,
       Stock: product.stock,
       "Stock Mínimo": product.minStock,
-      "IVA %": product.taxRate,
-      Estado: product.status,
-      Proveedor: product.supplier || "",
+      "IVA %": product.ivaRate || 21,
+      Color: product.color || "",
+      Talla: product.size || "",
+      Material: product.material || "",
+      Estado: product.active ? "Activo" : "Inactivo",
       "Código de Barras": product.barcode || "",
       Descripción: product.description || "",
-      Etiquetas: product.tags?.join(", ") || "",
-      Creado: product.createdAt.toLocaleDateString(),
-      Actualizado: product.updatedAt.toLocaleDateString(),
+      Etiquetas: product.tags?.map((tag) => tag.name).join(", ") || "",
+      Creado: new Date(product.createdAt).toLocaleDateString(),
+      Actualizado: new Date(product.updatedAt).toLocaleDateString(),
     }))
 
     // Simular descarga
@@ -421,6 +390,32 @@ export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView 
       title: "Exportación exitosa",
       description: `Se exportaron ${excelData.length} productos a Excel`,
     })
+  }
+
+  if (isLoading) {
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center p-8">
+          <div className="text-center">
+            <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+            <p>Cargando productos...</p>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="flex items-center justify-center p-8">
+          <div className="text-center">
+            <p className="text-red-600 mb-4">Error al cargar productos: {error}</p>
+            <Button onClick={() => fetchProducts()}>Reintentar</Button>
+          </div>
+        </CardContent>
+      </Card>
+    )
   }
 
   return (
@@ -457,15 +452,30 @@ export function ProductsTable({ data = sampleProducts, onEdit, onDelete, onView 
                 ))}
               </SelectContent>
             </Select>
-            <Select value={statusFilter} onValueChange={setStatusFilter}>
-              <SelectTrigger className="w-[150px]">
-                <SelectValue placeholder="Estado" />
+            <Select value={supplierFilter} onValueChange={setSupplierFilter}>
+              <SelectTrigger className="w-[180px]">
+                <SelectValue placeholder="Proveedor" />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="all">Todos</SelectItem>
-                <SelectItem value="active">Activo</SelectItem>
-                <SelectItem value="inactive">Inactivo</SelectItem>
-                <SelectItem value="discontinued">Descontinuado</SelectItem>
+                <SelectItem value="all">Todos los proveedores</SelectItem>
+                {suppliers.map((supplier) => (
+                  <SelectItem key={supplier} value={supplier || ""}>
+                    {supplier}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={brandFilter} onValueChange={setBrandFilter}>
+              <SelectTrigger className="w-[150px]">
+                <SelectValue placeholder="Marca" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todas las marcas</SelectItem>
+                {brands.map((brand) => (
+                  <SelectItem key={brand} value={brand || ""}>
+                    {brand}
+                  </SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </div>
