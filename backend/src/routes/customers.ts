@@ -3,7 +3,7 @@ import { Router } from "express"
 import { PrismaClient } from "@prisma/client"
 import type { AuthenticatedRequest } from "../types"
 import type { CreateCustomerRequest, UpdateCustomerRequest } from "../types"
-import { authenticateToken, requireRole } from "@/middleware/auth"
+import { authenticateToken, requireRole } from "../middleware/auth"
 
 const prisma = new PrismaClient()
 const router = Router()

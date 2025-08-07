@@ -13,7 +13,9 @@ import categoryRoutes from "./routes/categories"
 import productRoutes from "./routes/products"
 import authRoutes from "./routes/auth"
 import employeeRoutes from "./routes/employees"
-import suppliersRoutes from "./routes/suppliers" // Por implementar
+import suppliersRoutes from "./routes/suppliers" 
+import salesRoutes from "./routes/sales"
+import customersRoutes from "./routes/customers"
 
 // Middleware de manejo de errores
 import errorHandler from "./middleware/errorHandler"
@@ -39,7 +41,9 @@ app.use("/api/auth", authRoutes)
 app.use("/api/categories", categoryRoutes)
 app.use("/api/products", productRoutes)
 app.use("/api/employees", employeeRoutes)
-app.use("/api/suppliers", suppliersRoutes) // Por implementar
+app.use("/api/suppliers", suppliersRoutes) 
+app.use("/api/sales", salesRoutes)
+app.use("/api/customers", customersRoutes)
 
 // Ruta de salud
 app.get("/api/health", (req, res) => {
