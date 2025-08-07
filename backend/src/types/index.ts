@@ -213,3 +213,16 @@ export interface StockUpdateData {
   stock: number
   operation?: "set" | "add" | "subtract"
 }
+
+// types.ts
+
+export interface CreateCustomerRequest {
+  name: string
+  documentType: "DNI" | "CUIT" | "CUIL" | "PASAPORTE"
+  documentNumber: string
+  taxStatus: "RESPONSABLE_INSCRIPTO" | "MONOTRIBUTISTA" | "EXENTO" | "CONSUMIDOR_FINAL"
+  email?: string
+  address?: string
+}
+
+export interface UpdateCustomerRequest extends CreateCustomerRequest {}
