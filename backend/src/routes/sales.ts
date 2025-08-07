@@ -36,10 +36,10 @@ router.post(
         return res.status(401).json({ success: false, error: "PIN incorrecto o usuario no autorizado" })
       }
 
-      res.json({ success: true, message: "PIN válido", userId: user.id })
+      return res.json({ success: true, message: "PIN válido", userId: user.id })
     } catch (error) {
       console.error("❌ Error validando el PIN:", error)
-      res.status(500).json({ success: false, error: "Error interno del servidor" })
+      return res.status(500).json({ success: false, error: "Error interno del servidor" })
     }
   }
 )
