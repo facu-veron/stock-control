@@ -72,10 +72,12 @@ export interface Product {
 
 export interface AuthenticatedRequest extends Request {
   user?: AuthenticatedUser
+  tenantId?: string
 }
 
 export interface AuthenticatedUser {
   id: string
+  tenantId: string
   email: string
   name: string
   role: "ADMIN" | "EMPLOYEE"

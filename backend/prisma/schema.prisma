@@ -1,3 +1,6 @@
+// ─────────────────────────────────────────────────────────────────────────────
+// Generators & Datasource
+// ─────────────────────────────────────────────────────────────────────────────
 generator client {
   provider = "prisma-client-js"
 }
@@ -7,115 +10,12 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-model Category {
-  id          String    @id @default(cuid())
-  name        String    @unique
-  description String?
-  color       String?   @default("#3b82f6")
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
-
-  // Relaciones
-  products    Product[]
-
-  @@map("categories")
-}
-
-model Supplier {
-  id        String   @id @default(cuid())
-  name      String   @unique
-  contact   String?
-  email     String?
-  phone     String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  products  Product[]
-
-  @@map("suppliers")
-}
-
-
-model Tag {
-  id       String    @id @default(cuid())
-  name     String    @unique
-
-  // Relación muchos a muchos implícita
-  products Product[] @relation("ProductTags")
-
-  @@map("tags")
-}
-
-model Product {
-  // Basic information
-  active      Boolean  @default(true)
-  barcode     String?  @unique
-  brand       String?
-  color       String?
-  cost        Float?   @default(0)
-  createdAt   DateTime @default(now())
-  description String?
-  id          String   @id @default(cuid())
-  image       String?
-  ivaRate     Float?
-  material    String?
-  maxStock    Int?
-  minStock    Int      @default(0)
-  name        String
-  price       Float
-  size        String?
-  sku         String?  @unique
-  stock       Int      @default(0)
-  unit        String   @default("unidad")
-  updatedAt   DateTime @updatedAt
-
-  // Relaciones
-  categoryId  String
-  category    Category @relation(fields: [categoryId], references: [id], onDelete: Cascade)
-
-  supplierId  String?
-  supplier    Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
-
-  tags        Tag[]     @relation("ProductTags") // many-to-many implícita
-
-  @@index([categoryId])
-  @@index([sku])
-  @@index([barcode])
-  @@map("products")
-}
-
-model User {
-  id        String   @id @default(cuid())
-  email     String   @unique
-  name      String
-  password  String
-  role      Role     @default(EMPLOYEE)
-  pin       String?  // Añadir este campo si no lo tenías
-  active    Boolean  @default(true)
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-
-  @@map("users")
-}
-
+// ─────────────────────────────────────────────────────────────────────────────
+// Enums (Core + Billing)
+// ─────────────────────────────────────────────────────────────────────────────
 enum Role {
   ADMIN
   EMPLOYEE
-}
-
-model Customer {
-  id              String   @id @default(cuid())
-  name            String
-  documentType    DocumentType
-  documentNumber  String
-  taxStatus       TaxStatus
-  email           String?
-  address         String?
-  createdAt       DateTime @default(now())
-  updatedAt       DateTime @updatedAt
-
-  @@map("customers")
-  @@index([documentNumber])
 }
 
 enum TaxStatus {
@@ -130,4 +30,583 @@ enum DocumentType {
   CUIT
   CUIL
   PASAPORTE
+}
+
+enum AfipMode {
+  HOMOLOGACION
+  PRODUCCION
+}
+
+// Billing
+enum BillingInterval {
+  ONE_TIME
+  MONTH
+  YEAR
+}
+
+enum SubscriptionStatus {
+  INCOMPLETE
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  UNPAID
+}
+
+enum InvoiceStatus {
+  DRAFT
+  OPEN
+  PAID
+  VOID
+  UNCOLLECTIBLE
+}
+
+enum PaymentStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  REFUNDED
+}
+
+enum PaymentProcessor {
+  STRIPE
+  MERCADOPAGO
+  OTHER
+}
+
+enum CouponDuration {
+  ONCE
+  REPEATING
+  FOREVER
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Multitenancy core
+// ─────────────────────────────────────────────────────────────────────────────
+model Tenant {
+  id   String   @id @default(cuid())
+  name String   @unique
+  cuit String   @unique
+  mode AfipMode @default(HOMOLOGACION)
+
+  // Relaciones 1-N
+  users       User[]
+  afipCred    AfipCredential?
+  pos         AfipPointOfSale[]
+  categories  Category[]
+  suppliers   Supplier[]
+  products    Product[]
+  customers   Customer[]
+  sales       Sale[]
+  saleItems   SaleItem[]
+  tags        Tag[]
+  productTags ProductTag[]
+
+  // Billing
+  subscriptions Subscription[]
+  invoices      Invoice[]
+  payments      Payment[]
+  couponUses    CouponRedemption[]
+  webhooks      WebhookEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tenants")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Billing (Catálogo de planes/precios global) + Suscripciones/Facturas/Pagos
+// ─────────────────────────────────────────────────────────────────────────────
+model Plan {
+  id          String  @id @default(cuid())
+  code        String  @unique // p.ej. "BASIC", "PRO", "LIFETIME"
+  name        String
+  description String?
+  active      Boolean @default(true)
+
+  // Metadatos opcionales (limitaciones por plan)
+  // maxUsers Int?, maxProducts Int?, etc.
+
+  prices    Price[]
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("plans")
+}
+
+model Price {
+  id     String @id @default(cuid())
+  planId String
+  plan   Plan   @relation(fields: [planId], references: [id])
+
+  interval BillingInterval
+  amount   Decimal         @db.Decimal(12, 2)
+  currency String          @default("ARS")
+  active   Boolean         @default(true)
+
+  processor        PaymentProcessor?
+  processorPriceId String?
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  Subscription Subscription[]
+
+  @@index([planId])
+  @@index([interval, active])
+  @@map("prices")
+}
+
+model Subscription {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  priceId String
+  price   Price  @relation(fields: [priceId], references: [id])
+
+  status             SubscriptionStatus @default(INCOMPLETE)
+  quantity           Int                @default(1)
+  trialEndsAt        DateTime?
+  currentPeriodStart DateTime?
+  currentPeriodEnd   DateTime?
+
+  cancelAt   DateTime?
+  canceledAt DateTime?
+
+  processor           PaymentProcessor?
+  processorCustomerId String?
+  processorSubId      String?
+
+  couponRedemptionId String?
+  couponRedemption   CouponRedemption? @relation(fields: [couponRedemptionId], references: [id])
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  Invoice   Invoice[]
+
+  @@index([tenantId, status])
+  @@map("subscriptions")
+}
+
+model Invoice {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  subscriptionId String?
+  subscription   Subscription? @relation(fields: [subscriptionId], references: [id])
+
+  number     String?       @unique
+  currency   String        @default("ARS")
+  amountDue  Decimal       @db.Decimal(12, 2)
+  taxAmount  Decimal?      @db.Decimal(12, 2)
+  amountPaid Decimal       @default(0) @db.Decimal(12, 2)
+  dueDate    DateTime?
+  status     InvoiceStatus @default(DRAFT)
+
+  hostedInvoiceUrl   String?
+  pdfUrl             String?
+  processor          PaymentProcessor?
+  processorInvoiceId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  payments Payment[]
+
+  @@index([tenantId, status])
+  @@map("invoices")
+}
+
+model Payment {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id])
+
+  amount   Decimal       @db.Decimal(12, 2)
+  currency String        @default("ARS")
+  status   PaymentStatus @default(PENDING)
+  method   String?
+
+  processor          PaymentProcessor?
+  processorPaymentId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, status])
+  @@map("payments")
+}
+
+model Coupon {
+  id               String         @id @default(cuid())
+  code             String         @unique // p.ej. "BIENVENIDO10"
+  name             String?
+  percentOff       Decimal?       @db.Decimal(5, 2)
+  amountOff        Decimal?       @db.Decimal(12, 2)
+  currency         String?
+  duration         CouponDuration @default(ONCE)
+  durationInMonths Int?
+  maxRedemptions   Int?
+  redeemBy         DateTime?
+  active           Boolean        @default(true)
+
+  appliesToPlanId  String?
+  appliesToPriceId String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  redemptions CouponRedemption[]
+
+  @@map("coupons")
+}
+
+model CouponRedemption {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  couponId String
+  coupon   Coupon @relation(fields: [couponId], references: [id])
+
+  timesRedeemed   Int       @default(0)
+  firstRedeemedAt DateTime?
+  lastRedeemedAt  DateTime?
+  active          Boolean   @default(true)
+
+  createdAt    DateTime       @default(now())
+  updatedAt    DateTime       @updatedAt
+  Subscription Subscription[]
+
+  @@unique([tenantId, couponId])
+  @@index([tenantId])
+  @@map("coupon_redemptions")
+}
+
+model WebhookEvent {
+  id         String           @id @default(cuid())
+  processor  PaymentProcessor
+  eventType  String
+  externalId String?
+  payload    Json
+  receivedAt DateTime         @default(now())
+  handled    Boolean          @default(false)
+  handledAt  DateTime?
+  Tenant     Tenant?          @relation(fields: [tenantId], references: [id])
+  tenantId   String?
+
+  @@index([processor, eventType])
+  @@map("webhook_events")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AFIP (credenciales, token, puntos de venta)
+// ─────────────────────────────────────────────────────────────────────────────
+model AfipCredential {
+  id String @id @default(cuid())
+
+  tenantId String @unique
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  certPem String
+  keyPem  String
+  service String @default("wsfe")
+
+  token     AfipToken?
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  @@map("afip_credentials")
+}
+
+model AfipToken {
+  id String @id @default(cuid())
+
+  credentialId String         @unique
+  credential   AfipCredential @relation(fields: [credentialId], references: [id])
+
+  token          String
+  sign           String
+  generationTime DateTime
+  expirationTime DateTime
+  rawXml         String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("afip_tokens")
+}
+
+model AfipPointOfSale {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  ptoVta      Int
+  description String?
+  active      Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  Sale      Sale[]
+
+  @@unique([tenantId, ptoVta])
+  @@index([tenantId])
+  @@map("afip_pos")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Usuarios
+// ─────────────────────────────────────────────────────────────────────────────
+model User {
+  id       String @id @default(cuid())
+  tenantId String
+  name     String
+  email    String @db.Citext
+  password String
+  role     Role   @default(EMPLOYEE)
+
+  pinHash       String?
+  pinLastUsedAt DateTime?
+
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  Tenant    Tenant   @relation(fields: [tenantId], references: [id])
+  Sale      Sale[]
+
+  @@unique([tenantId, email])
+  @@unique([tenantId, pinHash])
+  @@index([tenantId])
+  @@map("users")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Catálogo y Productos
+// ─────────────────────────────────────────────────────────────────────────────
+model Category {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  name        String
+  description String?
+  color       String? @default("#3b82f6")
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("categories")
+}
+
+model Supplier {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  name    String
+  contact String?
+  email   String?
+  phone   String?
+
+  products Product[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+  @@map("suppliers")
+}
+
+model Tag {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  name String
+
+  productTags ProductTag[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, name]) // tag único por tenant
+  @@index([tenantId])
+  @@map("tags")
+}
+
+model Product {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  // Relaciones de catálogo
+  categoryId String
+  // Seguro: sin Cascade (evita borrar productos si borran una categoría)
+  category   Category @relation(fields: [categoryId], references: [id])
+
+  supplierId String?
+  supplier   Supplier? @relation(fields: [supplierId], references: [id], onDelete: SetNull)
+
+  // Atributos del producto
+  name        String
+  description String?
+  sku         String?
+  barcode     String?
+  price       Decimal  @db.Decimal(12, 2)
+  cost        Decimal? @db.Decimal(12, 2)
+  stock       Int      @default(0)
+  minStock    Int      @default(0)
+  maxStock    Int?
+  unit        String   @default("unidad")
+  brand       String?
+  color       String?
+  size        String?
+  material    String?
+  ivaRate     Decimal? @db.Decimal(5, 2)
+  active      Boolean  @default(true)
+
+  productTags ProductTag[]
+  saleItems   SaleItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, sku]) // sku único por tenant
+  // @@unique([tenantId, barcode])     // si querés también barcode único por tenant
+  @@index([tenantId, name]) // búsquedas por nombre
+  @@index([tenantId, stock, minStock]) // alertas de bajo stock
+  @@index([categoryId])
+  @@index([supplierId])
+  @@map("products")
+}
+
+// Unión explícita Product ↔ Tag (con tenantId para scoping y auditoría)
+model ProductTag {
+  productId String
+  tagId     String
+  tenantId  String
+
+  product Product @relation(fields: [productId], references: [id], onDelete: Cascade)
+  tag     Tag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+  tenant  Tenant  @relation(fields: [tenantId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@id([productId, tagId]) // evita duplicar el mismo tag en el mismo producto
+  @@index([tenantId])
+  @@map("product_tags")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Clientes y Ventas (con detalle de líneas)
+// ─────────────────────────────────────────────────────────────────────────────
+model Customer {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  name           String
+  documentType   DocumentType
+  documentNumber String
+  taxStatus      TaxStatus
+  email          String?
+  address        String?
+
+  sales Sale[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, documentType, documentNumber]) // evita duplicar DNI/CUIT por tenant
+  @@index([tenantId, documentNumber])
+  @@map("customers")
+}
+
+model Sale {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  // Atribución a vendedor (no necesitas PIN aquí; ya traés el usuario por pin en caja)
+  employeeId String?
+  employee   User?   @relation(fields: [employeeId], references: [id])
+
+  customerId String?
+  customer   Customer? @relation(fields: [customerId], references: [id])
+
+  posId String?
+  pos   AfipPointOfSale? @relation(fields: [posId], references: [id])
+
+  // Totales de la venta (congelados al momento)
+  subtotal      Decimal  @default(0) @db.Decimal(12, 2)
+  taxTotal      Decimal? @db.Decimal(12, 2)
+  discountTotal Decimal? @db.Decimal(12, 2)
+  grandTotal    Decimal  @default(0) @db.Decimal(12, 2)
+
+  // AFIP
+  ptoVta     Int
+  cbteTipo   Int
+  cae        String?
+  caeVto     DateTime?
+  afipStatus String?
+
+  items SaleItem[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId])
+  @@index([employeeId])
+  @@index([customerId])
+  @@index([posId])
+  @@map("sales")
+}
+
+model SaleItem {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  saleId String
+  sale   Sale   @relation(fields: [saleId], references: [id], onDelete: Cascade)
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  // Datos “congelados” al momento de vender
+  productName String
+  skuSnapshot String?
+  unitPrice   Decimal  @db.Decimal(12, 2)
+  quantity    Int
+  ivaRate     Decimal? @db.Decimal(5, 2)
+  lineTotal   Decimal  @db.Decimal(12, 2)
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId])
+  @@index([saleId])
+  @@index([productId])
+  @@map("sale_items")
 }

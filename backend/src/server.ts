@@ -4,6 +4,8 @@ import helmet from "helmet"
 import morgan from "morgan"
 import dotenv from "dotenv"
 import { PrismaClient } from "@prisma/client"
+import { scheduleWsaaAutoRefresh } from "./cron/wsaa-refresh"
+
 
 // Cargar variables de entorno
 dotenv.config()
@@ -33,6 +35,10 @@ app.use(
     credentials: true,
   }),
 )
+// Cron 
+scheduleWsaaAutoRefresh()
+
+
 app.use(express.json({ limit: "10mb" }))
 app.use(express.urlencoded({ extended: true }))
 
