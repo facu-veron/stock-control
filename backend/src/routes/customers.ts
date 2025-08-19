@@ -1,9 +1,7 @@
 // routes/customers.ts
 import { Router } from "express";
-import { Prisma } from "@prisma/client";
-import { prisma } from "../lib/prisma"; // <- usa singleton
-import type { AuthenticatedRequest } from "../types";
-import type { CreateCustomerRequest, UpdateCustomerRequest } from "../types";
+import { prisma } from "../lib/prisma"; 
+
 import { authenticateToken, requireRole } from "../middleware/auth";
 
 const router = Router();
