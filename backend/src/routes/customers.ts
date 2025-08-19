@@ -1,81 +1,99 @@
 // routes/customers.ts
-import { Router } from "express"
-import { PrismaClient } from "@prisma/client"
-import type { AuthenticatedRequest } from "../types"
-import type { CreateCustomerRequest, UpdateCustomerRequest } from "../types"
-import { authenticateToken, requireRole } from "../middleware/auth"
+import { Router } from "express";
+import { Prisma } from "@prisma/client";
+import { prisma } from "../lib/prisma"; // <- usa singleton
+import type { AuthenticatedRequest } from "../types";
+import type { CreateCustomerRequest, UpdateCustomerRequest } from "../types";
+import { authenticateToken, requireRole } from "../middleware/auth";
 
-const prisma = new PrismaClient()
-const router = Router()
+const router = Router();
 
-// Listar todos los clientes
-router.get("/", authenticateToken, async (req, res) => {
+// Listar clientes (opcional: filtros simples y paginación)
+router.get("/", authenticateToken, async (req, res): Promise<void> => {
   try {
+    const tenantId = (req as any).user.tenantId;
     const customers = await prisma.customer.findMany({
+      where: { tenantId },
       orderBy: { createdAt: "desc" },
-    })
-    res.json({ success: true, data: customers })
+    });
+    res.json({ success: true, data: customers });
+    return;
   } catch (error) {
-    console.error("Error fetching customers:", error)
-    res.status(500).json({ success: false, error: "Failed to fetch customers" })
+    console.error("Error fetching customers:", error);
+    res.status(500).json({ success: false, error: "Failed to fetch customers" });
+    return;
   }
-})
+});
 
-// Obtener un cliente por ID
-router.get("/:id", authenticateToken, async (req, res) => {
-  const { id } = req.params
+router.get("/:id", authenticateToken, async (req, res): Promise<void> => {
+  const { id } = req.params;
+  const tenantId = (req as any).user.tenantId;
   try {
-    const customer = await prisma.customer.findUnique({ where: { id } })
+    const customer = await prisma.customer.findFirst({ where: { id, tenantId } });
     if (!customer) {
-      return res.status(404).json({ success: false, error: "Customer not found" })
+      res.status(404).json({ success: false, error: "Customer not found" });
+      return;
     }
-
-    return res.json({ success: true, data: customer }) // 👈 return explícito
+    res.json({ success: true, data: customer });
+    return;
   } catch (error) {
-    return res.status(500).json({ success: false, error: "Failed to fetch customer" }) // 👈 return explícito
+    res.status(500).json({ success: false, error: "Failed to fetch customer" });
+    return;
   }
-})
+});
 
-// Crear cliente
-router.post("/", authenticateToken, requireRole(["ADMIN"])
-, async (req: AuthenticatedRequest, res) => {
-  const data = req.body as CreateCustomerRequest
-  try {
-    const created = await prisma.customer.create({ data })
-    res.status(201).json({ success: true, data: created })
-  } catch (error) {
-    console.error("Error creating customer:", error)
-    res.status(500).json({ success: false, error: "Failed to create customer" })
+router.post("/", authenticateToken, requireRole(["ADMIN"]),
+  async (req, res): Promise<void> => {
+    const tenantId = (req as any).user.tenantId;
+    try {
+      const created = await prisma.customer.create({ data: { ...req.body, tenantId } });
+      res.status(201).json({ success: true, data: created });
+      return;
+    } catch (error: any) {
+      res.status(500).json({ success: false, error: "Failed to create customer" });
+      return;
+    }
   }
-})
+);
 
-// Actualizar cliente
-router.put("/:id", authenticateToken, requireRole(["ADMIN"])
-, async (req: AuthenticatedRequest, res) => {
-  const { id } = req.params
-  const data = req.body as UpdateCustomerRequest
-  try {
-    const updated = await prisma.customer.update({ where: { id }, data })
-    res.json({ success: true, data: updated })
-  } catch (error) {
-    console.error("Error updating customer:", error)
-    res.status(500).json({ success: false, error: "Failed to update customer" })
+router.put("/:id", authenticateToken, requireRole(["ADMIN"]),
+  async (req, res): Promise<void> => {
+    const { id } = req.params;
+    const tenantId = (req as any).user.tenantId;
+    try {
+      const updated = await prisma.customer.updateMany({ where: { id, tenantId }, data: req.body });
+      if (updated.count === 0) {
+        res.status(404).json({ success: false, error: "Customer not found" });
+        return;
+      }
+      const fresh = await prisma.customer.findFirst({ where: { id, tenantId } });
+      res.json({ success: true, data: fresh });
+      return;
+    } catch (error) {
+      res.status(500).json({ success: false, error: "Failed to update customer" });
+      return;
+    }
   }
-})
+);
 
-// Eliminar cliente
-router.delete("/:id", authenticateToken, requireRole(["ADMIN"])
-, async (req, res) => {
-  const { id } = req.params
-  try {
-    await prisma.customer.delete({ where: { id } })
-    res.json({ success: true, message: "Customer deleted successfully" })
-  } catch (error) {
-    console.error("Error deleting customer:", error)
-    res.status(500).json({ success: false, error: "Failed to delete customer" })
+router.delete("/:id", authenticateToken, requireRole(["ADMIN"]),
+  async (req, res): Promise<void> => {
+    const { id } = req.params;
+    const tenantId = (req as any).user.tenantId;
+    try {
+      const deleted = await prisma.customer.deleteMany({ where: { id, tenantId } });
+      if (deleted.count === 0) {
+        res.status(404).json({ success: false, error: "Customer not found" });
+        return;
+      }
+      res.json({ success: true, message: "Customer deleted successfully" });
+      return;
+    } catch (error) {
+      res.status(500).json({ success: false, error: "Failed to delete customer" });
+      return;
+    }
   }
-})
+);
 
 
-
-export default router
+export default router;

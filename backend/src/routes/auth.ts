@@ -1,195 +1,269 @@
-import { Router, type Response } from "express"
-import bcrypt from "bcryptjs"
-import jwt from "jsonwebtoken"
-import { body, validationResult } from "express-validator"
-import { PrismaClient, type Role } from "@prisma/client"
-import { authenticateToken } from "../middleware/auth"
-import type { AuthenticatedRequest, ApiResponse } from "../types"
+import { Router, type Response } from "express";
+import { body, validationResult } from "express-validator";
+import { PrismaClient, Role } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import jwt from "jsonwebtoken";
+import type { ApiResponse, AuthenticatedRequest } from "../types";
+import { authenticateToken, requireRole } from "../middleware/auth";
 
-const router = Router()
-const prisma = new PrismaClient()
+const prisma = new PrismaClient();
+const router = Router();
 
-// Validaciones
-const validateRegister = [
-  body("email").isEmail().withMessage("Email inválido").normalizeEmail(),
-  body("name")
-    .trim()
-    .notEmpty()
-    .withMessage("El nombre es requerido")
-    .isLength({ min: 2, max: 100 })
-    .withMessage("El nombre debe tener entre 2 y 100 caracteres"),
-  body("password").isLength({ min: 6 }).withMessage("La contraseña debe tener al menos 6 caracteres"),
-  body("role").optional().isIn(["ADMIN", "EMPLOYEE"]).withMessage("Rol inválido"),
-]
+/* =========================
+ * Helpers
+ * =======================*/
+const ok = (res: Response, data: unknown, message?: string) =>
+  res.json({ success: true, message, data } as ApiResponse);
+const created = (res: Response, data: unknown, message?: string) =>
+  res.status(201).json({ success: true, message, data } as ApiResponse);
+const fail = (res: Response, code: number, error: string, details?: unknown) =>
+  res.status(code).json({ success: false, error, details } as ApiResponse);
+
+const signToken = (payload: object) =>
+  jwt.sign(payload, process.env.JWT_SECRET!, {
+    expiresIn: process.env.JWT_EXPIRES_IN ?? "7d",
+  });
+
+/* =========================
+ * Validations
+ * =======================*/
+const validateSignup = [
+  body("tenantName").trim().isLength({ min: 2, max: 100 }),
+  body("tenantCuit").trim().isLength({ min: 8, max: 20 }),
+  body("name").trim().isLength({ min: 2, max: 100 }),
+  body("email").isEmail().normalizeEmail(),
+  body("password").isLength({ min: 8 }),
+];
 
 const validateLogin = [
-  body("email").isEmail().withMessage("Email inválido").normalizeEmail(),
-  body("password").notEmpty().withMessage("La contraseña es requerida"),
-]
+  body("email").isEmail().normalizeEmail(),
+  body("password").isString().isLength({ min: 1 }),
+  body("tenantName").optional().isString().isLength({ min: 2 }),
+  body("tenantCuit").optional().isString().isLength({ min: 8 }),
+];
 
-interface RegisterBody {
-  email: string
-  name: string
-  password: string
-  role?: Role
-}
+const validateRegister = [
+  body("email").isEmail().normalizeEmail(),
+  body("name").trim().isLength({ min: 2, max: 100 }),
+  body("password").isLength({ min: 8 }),
+  body("role").optional().isIn(["ADMIN", "EMPLOYEE"]),
+];
 
-interface LoginBody {
-  email: string
-  password: string
-}
+/* =========================
+ * POST /api/auth/signup  (PÚBLICO)
+ * Crea Tenant + primer ADMIN. No mezcla tenants.
+ * =======================*/
+router.post(
+  "/signup",
+  validateSignup,
+  async (req: any, res: Response): Promise<void> => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        fail(res, 400, "Datos inválidos", errors.array());
+        return;
+      }
 
-// POST /api/auth/register - Registrar usuario
-router.post("/register", validateRegister, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  try {
-    const errors = validationResult(req)
-    if (!errors.isEmpty()) {
-      res.status(400).json({
-        success: false,
-        error: "Datos de entrada inválidos",
-        details: errors.array(),
-      } as ApiResponse)
-      return
+      const { tenantName, tenantCuit, name, email, password } = req.body as {
+        tenantName: string;
+        tenantCuit: string;
+        name: string;
+        email: string;
+        password: string;
+      };
+
+      // Verifica unicidad de tenant
+      const existingTenant = await prisma.tenant.findFirst({
+        where: { OR: [{ name: tenantName }, { cuit: tenantCuit }] },
+      });
+      if (existingTenant) {
+        fail(res, 409, "El tenant ya existe (nombre o CUIT)");
+        return;
+      }
+
+      const hashed = await bcrypt.hash(
+        password + (process.env.PASSWORD_PEPPER ?? ""),
+        12
+      );
+
+      // Transacción: crear Tenant y primer ADMIN
+      const result = await prisma.$transaction(async (tx) => {
+        const tenant = await tx.tenant.create({
+          data: { name: tenantName, cuit: tenantCuit },
+        });
+
+        const user = await tx.user.create({
+          data: {
+            tenantId: tenant.id,
+            name,
+            email,
+            password: hashed,
+            role: Role.ADMIN,
+          },
+          select: {
+            id: true,
+            email: true,
+            name: true,
+            role: true,
+            active: true,
+            createdAt: true,
+          },
+        });
+
+        return { tenant, user };
+      });
+
+      // (Opcional) emitir token ya logueado
+      const token = signToken({
+        userId: result.user.id,
+        tenantId: result.tenant.id,
+        role: result.user.role,
+        email: result.user.email,
+      });
+
+      created(res, { ...result, token }, "Tenant y usuario ADMIN creados");
+    } catch (error) {
+      console.error("Error en signup:", error);
+      fail(res, 500, "Error interno del servidor");
     }
+  }
+);
 
-    const { email, name, password, role = "EMPLOYEE" }: RegisterBody = req.body
+/* =========================
+ * POST /api/auth/login  (PÚBLICO)
+ * Requiere identificar el tenant por nombre o CUIT + credenciales.
+ * Devuelve JWT con tenantId para aislar datos.
+ * =======================*/
+router.post(
+  "/login",
+  validateLogin,
+  async (req: any, res: Response): Promise<void> => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        fail(res, 400, "Datos inválidos", errors.array());
+        return;
+      }
 
-    // Verificar si el usuario ya existe
-    const existingUser = await prisma.user.findUnique({
-      where: { email },
-    })
+      const { email, password, tenantName, tenantCuit } = req.body as {
+        email: string;
+        password: string;
+        tenantName?: string;
+        tenantCuit?: string;
+      };
 
-    if (existingUser) {
-      res.status(400).json({
-        success: false,
-        error: "El usuario ya existe",
-      } as ApiResponse)
-      return
+      if (!tenantName && !tenantCuit) {
+        fail(res, 400, "Debes enviar tenantName o tenantCuit");
+        return;
+      }
+
+      // Resuelve el tenant por nombre o CUIT
+      const tenant = await prisma.tenant.findFirst({
+        where: {
+          OR: [
+            tenantName ? { name: tenantName } : undefined,
+            tenantCuit ? { cuit: tenantCuit } : undefined,
+          ].filter(Boolean) as any,
+        },
+      });
+
+      if (!tenant) {
+        fail(res, 404, "Tenant no encontrado");
+        return;
+      }
+
+      const user = await prisma.user.findUnique({
+        where: { tenantId_email: { tenantId: tenant.id, email } },
+      });
+
+      if (!user || !user.active) {
+        fail(res, 401, "Credenciales inválidas");
+        return;
+      }
+
+      const valid = await bcrypt.compare(
+        password + (process.env.PASSWORD_PEPPER ?? ""),
+        user.password
+      );
+      if (!valid) {
+        fail(res, 401, "Credenciales inválidas");
+        return;
+      }
+
+      const token = signToken({
+        userId: user.id,
+        tenantId: user.tenantId,
+        role: user.role,
+        email: user.email,
+      });
+
+      ok(res, { token }, "Login exitoso");
+    } catch (error) {
+      console.error("Error en login:", error);
+      fail(res, 500, "Error interno del servidor");
     }
+  }
+);
 
-    // Hashear contraseña
-    const hashedPassword = await bcrypt.hash(password, 12)
+/* =========================
+ * POST /api/auth/register  (PROTEGIDO, ADMIN)
+ * Crea usuario dentro del mismo tenant del token.
+ * No acepta tenantId en el body → evita mezclar datos.
+ * =======================*/
+router.post(
+  "/register",
+  authenticateToken,
+  requireRole(["ADMIN"]),
+  validateRegister,
+  async (req: AuthenticatedRequest, res: Response): Promise<void> => {
+    try {
+      const errors = validationResult(req);
+      if (!errors.isEmpty()) {
+        fail(res, 400, "Datos de entrada inválidos", errors.array());
+        return;
+      }
 
-    // Crear usuario
-    const user = await prisma.user.create({
-      data: {
+      const tenantId = req.user!.tenantId;
+      const {
         email,
         name,
-        password: hashedPassword,
-        role,
-      },
-      select: {
-        id: true,
-        email: true,
-        name: true,
-        role: true,
-        active: true,
-        createdAt: true,
-      },
-    })
+        password,
+        role = "EMPLOYEE",
+      }: { email: string; name: string; password: string; role?: "ADMIN" | "EMPLOYEE" } =
+        req.body;
 
-    // Generar token
-    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, {
-      expiresIn: process.env.JWT_EXPIRES_IN || "7d",
-    })
+      // Unicidad por tenant
+      const existing = await prisma.user.findUnique({
+        where: { tenantId_email: { tenantId, email } },
+      });
+      if (existing) {
+        fail(res, 409, "El usuario ya existe");
+        return;
+      }
 
-    res.status(201).json({
-      success: true,
-      message: "Usuario registrado exitosamente",
-      data: {
-        user,
-        token,
-      },
-    } as ApiResponse)
-  } catch (error) {
-    console.error("Error en registro:", error)
-    res.status(500).json({
-      success: false,
-      error: "Error interno del servidor",
-    } as ApiResponse)
-  }
-})
+      const hashed = await bcrypt.hash(
+        password + (process.env.PASSWORD_PEPPER ?? ""),
+        12
+      );
 
-// POST /api/auth/login - Iniciar sesión
-router.post("/login", validateLogin, async (req: AuthenticatedRequest, res: Response): Promise<void> => {
-  try {
-    const errors = validationResult(req)
-    if (!errors.isEmpty()) {
-      res.status(400).json({
-        success: false,
-        error: "Datos de entrada inválidos",
-        details: errors.array(),
-      } as ApiResponse)
-      return
-    }
-
-    const { email, password }: LoginBody = req.body
-
-    // Buscar usuario
-    const user = await prisma.user.findUnique({
-      where: { email },
-    })
-
-    if (!user || !user.active) {
-      res.status(401).json({
-        success: false,
-        error: "Credenciales inválidas",
-      } as ApiResponse)
-      return
-    }
-
-    // Verificar contraseña
-    const isValidPassword = await bcrypt.compare(password, user.password)
-    if (!isValidPassword) {
-      res.status(401).json({
-        success: false,
-        error: "Credenciales inválidas",
-      } as ApiResponse)
-      return
-    }
-
-    // Generar token
-    const token = jwt.sign({ userId: user.id }, process.env.JWT_SECRET!, {
-      expiresIn: process.env.JWT_EXPIRES_IN || "7d",
-    })
-
-    res.json({
-      success: true,
-      message: "Inicio de sesión exitoso",
-      data: {
-        user: {
-          id: user.id,
-          email: user.email,
-          name: user.name,
-          role: user.role,
-          active: user.active,
+      const user = await prisma.user.create({
+        data: { tenantId, email, name, password: hashed, role: role as Role },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          active: true,
+          createdAt: true,
         },
-        token,
-      },
-    } as ApiResponse)
-  } catch (error) {
-    console.error("Error en login:", error)
-    res.status(500).json({
-      success: false,
-      error: "Error interno del servidor",
-    } as ApiResponse)
+      });
+
+      created(res, { user }, "Usuario registrado exitosamente");
+    } catch (error) {
+      console.error("Error en registro:", error);
+      fail(res, 500, "Error interno del servidor");
+    }
   }
-})
+);
 
-// GET /api/auth/me - Obtener información del usuario actual
-router.get("/me", authenticateToken, (req: AuthenticatedRequest, res: Response): void => {
-  res.json({
-    success: true,
-    data: req.user,
-  } as ApiResponse)
-})
-
-// POST /api/auth/logout - Cerrar sesión
-router.post("/logout", authenticateToken, (req: AuthenticatedRequest, res: Response): void => {
-  res.json({
-    success: true,
-    message: "Sesión cerrada exitosamente",
-  } as ApiResponse)
-})
-
-export default router
+export default router;
