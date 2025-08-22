@@ -1,5 +1,6 @@
 // src/services/afip/wsfe.ts
 import soap from "soap"
+import { prisma } from "../../lib/prisma";
 
 const WSFE_WSDL_HOMO = "https://wswhomo.afip.gov.ar/wsfev1/service.asmx?WSDL"
 const WSFE_WSDL_PROD = "https://servicios1.afip.gov.ar/wsfev1/service.asmx?WSDL"
@@ -122,4 +123,61 @@ export async function solicitarCAE({
     FeCAEReq: feCAEReq.FeCAEReq,
   })
   return resp?.FECAESolicitarResult
+}
+
+export async function obtenerPuntosVentaAFIP(tenantId: string) {
+  // 1. Obtener credenciales y token
+  const credential = await prisma.afipCredential.findUnique({
+    where: { tenantId },
+    include: { token: true, tenant: true }
+  });
+  if (!credential || !credential.token || !credential.tenant) throw new Error('Credenciales AFIP no configuradas');
+  const prod = credential.tenant.mode === 'PRODUCCION';
+  const client = await createWsfeClient(prod);
+  // 2. Llamar a FEParamGetPtosVentaAsync
+  const [result] = await client.FEParamGetPtosVentaAsync({
+    Auth: {
+      Token: credential.token.token,
+      Sign: credential.token.sign,
+      Cuit: Number(credential.tenant.cuit)
+    }
+  });
+  // 3. Mapear puntos de venta
+  const puntos = result?.FEParamGetPtosVentaResult?.ResultGet || [];
+  return puntos;
+}
+
+export async function procesarFacturacionAFIP({ tenantId, sale, tipoFactura, puntoVenta }: { tenantId: string, sale: any, tipoFactura: string, puntoVenta: number }) {
+  // 1. Obtener credenciales y token
+  const credential = await prisma.afipCredential.findUnique({
+    where: { tenantId },
+    include: { token: true, tenant: true }
+  });
+  if (!credential || !credential.token || !credential.tenant) throw new Error('Credenciales AFIP no configuradas');
+  const prod = credential.tenant.mode === 'PRODUCCION';
+  const client = await createWsfeClient(prod);
+  // 2. Armar feCAEReq
+  const fechaCbte = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+  const feCAEReq = buildFeCAERequest({
+    ptoVta: puntoVenta,
+    cbteTipo: 6, // Factura B
+    cbteNumero: 1, // Deberías obtener el último número autorizado y sumar 1
+    fechaCbte,
+    totals: {
+      impNeto: Number(sale.subtotal),
+      impIVA: Number(sale.taxTotal),
+      impTotal: Number(sale.grandTotal)
+    },
+    receptor: { docTipo: 99, docNro: 0 },
+    items: sale.items.map((item: any) => ({ qty: item.quantity, description: item.productName, unitPriceNeto: Number(item.unitPrice) }))
+  });
+  // 3. Llamar a solicitarCAE
+  const resp = await solicitarCAE({
+    client,
+    token: credential.token.token,
+    sign: credential.token.sign,
+    cuit: credential.tenant.cuit,
+    feCAEReq
+  });
+  return resp;
 }

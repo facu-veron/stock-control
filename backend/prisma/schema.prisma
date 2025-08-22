@@ -66,6 +66,8 @@ enum PaymentStatus {
   SUCCEEDED
   FAILED
   REFUNDED
+  CANCELLED
+  AUTHORIZED
 }
 
 enum PaymentProcessor {
@@ -80,6 +82,37 @@ enum CouponDuration {
   FOREVER
 }
 
+// Nuevos enums para MercadoPago
+enum MPPaymentMethod {
+  ACCOUNT_MONEY
+  CREDIT_CARD
+  DEBIT_CARD
+  BANK_TRANSFER
+  CASH
+  TICKET
+  BOLBRADESCO
+  OXXO
+  BANCOMER
+  PSE
+  EFECTY
+  REDPAGOS
+  RAPIPAGO
+  PAGOFACIL
+  OTHER
+}
+
+enum MPPreferenceStatus {
+  ACTIVE
+  PAUSED
+  EXPIRED
+  CANCELLED
+}
+
+enum MPPaymentMode {
+  GATEWAY // Checkout Pro
+  AGGREGATOR // Checkout API
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Multitenancy core
 // ─────────────────────────────────────────────────────────────────────────────
@@ -89,7 +122,15 @@ model Tenant {
   cuit String   @unique
   mode AfipMode @default(HOMOLOGACION)
 
-  // Relaciones 1-N
+  // Configuración adicional
+  timezone    String  @default("America/Argentina/Buenos_Aires")
+  currency    String  @default("ARS")
+  logoUrl     String?
+  website     String?
+  phoneNumber String?
+  address     String?
+
+  // Relaciones 1-N existentes
   users       User[]
   afipCred    AfipCredential?
   pos         AfipPointOfSale[]
@@ -109,10 +150,267 @@ model Tenant {
   couponUses    CouponRedemption[]
   webhooks      WebhookEvent[]
 
+  // Nuevas relaciones para MercadoPago
+  mpCredentials   MPCredential[]
+  mpPreferences   MPPreference[]
+  mpPayments      MPPayment[]
+  mpSubscriptions MPSubscription[]
+
+  // Nuevas relaciones para auditoría y configuración
+  auditLogs      AuditLog[]
+  settings       TenantSettings?
+  stockMovements StockMovement[]
+  dailySummaries DailySummary[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@map("tenants")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MERCADOPAGO - Credenciales y configuración
+// ─────────────────────────────────────────────────────────────────────────────
+model MPCredential {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  // Credenciales principales
+  publicKey    String
+  accessToken  String // Encriptado en la aplicación
+  clientId     String?
+  clientSecret String? // Encriptado en la aplicación
+
+  // Configuración del ambiente
+  isProduction Boolean @default(false)
+  country      String  @default("AR") // AR, BR, MX, etc.
+
+  // Configuración de webhook
+  webhookSecret String? // Para validar webhooks de MP
+  webhookUrl    String?
+
+  // Configuración de comisiones (para tu sistema)
+  commissionRate  Decimal? @db.Decimal(5, 4) // Tu comisión por transacción
+  fixedCommission Decimal? @db.Decimal(12, 2) // Comisión fija por transacción
+
+  // Estado y validación
+  isActive        Boolean   @default(true)
+  isValidated     Boolean   @default(false)
+  lastValidatedAt DateTime?
+  validationError String?
+
+  // Relaciones
+  preferences   MPPreference[]
+  payments      MPPayment[]
+  subscriptions MPSubscription[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, isProduction]) // Solo una credencial por ambiente por tenant
+  @@index([tenantId, isActive])
+  @@map("mp_credentials")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MERCADOPAGO - Preferencias de pago (Checkout Pro)
+// ─────────────────────────────────────────────────────────────────────────────
+model MPPreference {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  credentialId String
+  credential   MPCredential @relation(fields: [credentialId], references: [id], onDelete: Cascade)
+
+  // Identificadores de MercadoPago
+  mpPreferenceId   String  @unique // ID generado por MP
+  initPoint        String? // URL de checkout
+  sandboxInitPoint String? // URL de checkout en sandbox
+
+  // Referencia interna
+  externalReference String? // Tu referencia interna (ej: sale_id, subscription_id)
+  description       String
+
+  // Configuración de pago
+  mode        MPPaymentMode      @default(GATEWAY)
+  status      MPPreferenceStatus @default(ACTIVE)
+  totalAmount Decimal            @db.Decimal(12, 2)
+  currency    String             @default("ARS")
+
+  // Items de la preferencia (JSON para flexibilidad)
+  items Json
+
+  // URLs de retorno
+  successUrl String?
+  failureUrl String?
+  pendingUrl String?
+
+  // Configuración adicional
+  maxInstallments        Int?
+  excludedPaymentMethods Json? // Array de métodos excluidos
+  excludedPaymentTypes   Json? // Array de tipos excluidos
+
+  // Datos del comprador (opcional)
+  payerEmail          String?
+  payerName           String?
+  payerPhone          String?
+  payerIdentification Json? // {type, number}
+
+  // Fechas importantes
+  expiresAt DateTime?
+
+  // Relación con pagos realizados
+  payments MPPayment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([externalReference])
+  @@index([credentialId])
+  @@map("mp_preferences")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MERCADOPAGO - Pagos procesados
+// ─────────────────────────────────────────────────────────────────────────────
+model MPPayment {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  credentialId String
+  credential   MPCredential @relation(fields: [credentialId], references: [id])
+
+  preferenceId String?
+  preference   MPPreference? @relation(fields: [preferenceId], references: [id])
+
+  // Identificadores de MercadoPago
+  mpPaymentId       String  @unique // ID del pago en MP
+  mpOrderId         String? // ID de la orden en MP
+  externalReference String? // Tu referencia interna
+
+  // Detalles del pago
+  status        String // approved, pending, rejected, cancelled, etc.
+  statusDetail  String? // Detalle específico del estado
+  paymentMethod MPPaymentMethod
+  paymentTypeId String? // credit_card, debit_card, etc.
+
+  // Montos
+  transactionAmount Decimal  @db.Decimal(12, 2)
+  totalPaidAmount   Decimal? @db.Decimal(12, 2)
+  netReceivedAmount Decimal? @db.Decimal(12, 2) // Lo que realmente recibe el tenant
+  currency          String   @default("ARS")
+
+  // Comisiones
+  mercadopagoFee Decimal? @db.Decimal(12, 2) // Comisión de MP
+  platformFee    Decimal? @db.Decimal(12, 2) // Tu comisión
+
+  // Información del pagador
+  payerEmail          String?
+  payerName           String?
+  payerPhone          String?
+  payerIdentification Json? // {type, number}
+
+  // Información de la tarjeta (si aplica)
+  cardLastFourDigits  String?
+  cardFirstSixDigits  String?
+  cardExpirationMonth Int?
+  cardExpirationYear  Int?
+  cardholderName      String?
+
+  // Cuotas
+  installments      Int?     @default(1)
+  installmentAmount Decimal? @db.Decimal(12, 2)
+
+  // Fechas importantes
+  dateApproved    DateTime?
+  dateCreated     DateTime?
+  dateLastUpdated DateTime?
+
+  // Información adicional
+  description String?
+  metadata    Json? // Información adicional que quieras almacenar
+
+  // Webhook data
+  webhookPayload Json? // Payload completo del webhook para auditoría
+
+  // Relación con el sistema de billing interno
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id])
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([externalReference])
+  @@index([credentialId])
+  @@index([mpPaymentId])
+  @@map("mp_payments")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MERCADOPAGO - Suscripciones
+// ─────────────────────────────────────────────────────────────────────────────
+model MPSubscription {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  credentialId String
+  credential   MPCredential @relation(fields: [credentialId], references: [id])
+
+  // Identificadores
+  mpSubscriptionId  String  @unique // ID en MercadoPago
+  externalReference String? // Tu referencia interna
+
+  // Plan de suscripción
+  planId String?
+  reason String // Descripción de qué se está pagando
+
+  // Configuración
+  frequency     Int // 1 = mensual, 12 = anual, etc.
+  frequencyType String // "months", "days", "years"
+  repetitions   Int? // null = infinito
+  billingDay    Int? // Día del mes para cobrar (1-28)
+
+  // Montos
+  amount   Decimal @db.Decimal(12, 2)
+  currency String  @default("ARS")
+
+  // Estado
+  status String // authorized, paused, cancelled, finished
+
+  // Información del suscriptor
+  payerEmail          String
+  payerName           String?
+  payerPhone          String?
+  payerIdentification Json? // {type, number}
+
+  // Fechas importantes
+  startDate       DateTime
+  endDate         DateTime?
+  nextPaymentDate DateTime?
+
+  // URLs de retorno
+  backUrl String?
+
+  // Configuración del método de pago
+  cardToken String? // Token de tarjeta para cobros automáticos
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, status])
+  @@index([externalReference])
+  @@index([credentialId])
+  @@map("mp_subscriptions")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -126,7 +424,10 @@ model Plan {
   active      Boolean @default(true)
 
   // Metadatos opcionales (limitaciones por plan)
-  // maxUsers Int?, maxProducts Int?, etc.
+  maxUsers    Int?
+  maxProducts Int?
+  maxSales    Int?
+  features    Json? // Array de features incluidas
 
   prices    Price[]
   createdAt DateTime @default(now())
@@ -215,7 +516,8 @@ model Invoice {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  payments Payment[]
+  payments   Payment[]
+  mpPayments MPPayment[] // Nueva relación con pagos de MercadoPago
 
   @@index([tenantId, status])
   @@map("invoices")
@@ -300,10 +602,13 @@ model WebhookEvent {
   receivedAt DateTime         @default(now())
   handled    Boolean          @default(false)
   handledAt  DateTime?
+  error      String? // Para registrar errores en el procesamiento
+  retryCount Int              @default(0)
   Tenant     Tenant?          @relation(fields: [tenantId], references: [id])
   tenantId   String?
 
   @@index([processor, eventType])
+  @@index([handled, retryCount])
   @@map("webhook_events")
 }
 
@@ -378,15 +683,28 @@ model User {
   pinHash       String?
   pinLastUsedAt DateTime?
 
+  // Información adicional del usuario
+  firstName   String?
+  lastName    String?
+  phoneNumber String?
+  avatarUrl   String?
+  lastLoginAt DateTime?
+  timezone    String?   @default("America/Argentina/Buenos_Aires")
+
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
-  Tenant    Tenant   @relation(fields: [tenantId], references: [id])
-  Sale      Sale[]
+
+  // Relaciones
+  Tenant         Tenant          @relation(fields: [tenantId], references: [id])
+  Sale           Sale[]
+  auditLogs      AuditLog[]
+  stockMovements StockMovement[]
 
   @@unique([tenantId, email])
   @@unique([tenantId, pinHash])
   @@index([tenantId])
+  @@index([tenantId, active])
   @@map("users")
 }
 
@@ -402,6 +720,7 @@ model Category {
   name        String
   description String?
   color       String? @default("#3b82f6")
+  sortOrder   Int?    @default(0)
 
   products Product[]
 
@@ -410,6 +729,7 @@ model Category {
 
   @@unique([tenantId, name])
   @@index([tenantId])
+  @@index([tenantId, sortOrder])
   @@map("categories")
 }
 
@@ -423,6 +743,8 @@ model Supplier {
   contact String?
   email   String?
   phone   String?
+  address String?
+  taxId   String? // CUIT/DNI del proveedor
 
   products Product[]
 
@@ -440,7 +762,8 @@ model Tag {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id])
 
-  name String
+  name  String
+  color String? @default("#6b7280")
 
   productTags ProductTag[]
 
@@ -460,7 +783,6 @@ model Product {
 
   // Relaciones de catálogo
   categoryId String
-  // Seguro: sin Cascade (evita borrar productos si borran una categoría)
   category   Category @relation(fields: [categoryId], references: [id])
 
   supplierId String?
@@ -473,27 +795,41 @@ model Product {
   barcode     String?
   price       Decimal  @db.Decimal(12, 2)
   cost        Decimal? @db.Decimal(12, 2)
-  stock       Int      @default(0)
-  minStock    Int      @default(0)
-  maxStock    Int?
-  unit        String   @default("unidad")
-  brand       String?
-  color       String?
-  size        String?
-  material    String?
-  ivaRate     Decimal? @db.Decimal(5, 2)
-  active      Boolean  @default(true)
-  image      String?
-  productTags ProductTag[]
-  saleItems   SaleItem[]
 
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  // Gestión de stock
+  stock          Int     @default(0)
+  minStock       Int     @default(0)
+  maxStock       Int?
+  reservedStock  Int     @default(0) // Stock reservado para ventas pendientes
+  trackInventory Boolean @default(true)
+
+  unit       String   @default("unidad")
+  brand      String?
+  color      String?
+  size       String?
+  material   String?
+  weight     Decimal? @db.Decimal(8, 3) // en kg
+  dimensions String? // "alto x ancho x profundidad"
+
+  ivaRate Decimal? @db.Decimal(5, 2)
+  active  Boolean  @default(true)
+  image   String?
+  images  Json? // Array de URLs de imágenes adicionales
+
+  // SEO y búsqueda
+  searchKeywords String? // Palabras clave para búsqueda interna
+
+  productTags    ProductTag[]
+  saleItems      SaleItem[]
+  stockMovements StockMovement[]
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
 
   @@unique([tenantId, sku]) // sku único por tenant
-  // @@unique([tenantId, barcode])     // si querés también barcode único por tenant
   @@index([tenantId, name]) // búsquedas por nombre
+  @@index([tenantId, barcode]) // búsquedas por código de barras
   @@index([tenantId, stock, minStock]) // alertas de bajo stock
+  @@index([tenantId, active])
   @@index([categoryId])
   @@index([supplierId])
   @@map("products")
@@ -530,7 +866,21 @@ model Customer {
   documentNumber String
   taxStatus      TaxStatus
   email          String?
+  phoneNumber    String?
   address        String?
+  city           String?
+  state          String?
+  postalCode     String?
+  country        String?      @default("AR")
+
+  // Información comercial
+  creditLimit  Decimal? @db.Decimal(12, 2)
+  paymentTerms Int?     @default(0) // Días de crédito
+  discount     Decimal? @db.Decimal(5, 2) // Descuento por defecto
+
+  // Estado del cliente
+  active Boolean @default(true)
+  notes  String?
 
   sales Sale[]
 
@@ -539,6 +889,8 @@ model Customer {
 
   @@unique([tenantId, documentType, documentNumber]) // evita duplicar DNI/CUIT por tenant
   @@index([tenantId, documentNumber])
+  @@index([tenantId, name])
+  @@index([tenantId, active])
   @@map("customers")
 }
 
@@ -548,7 +900,7 @@ model Sale {
   tenantId String
   tenant   Tenant @relation(fields: [tenantId], references: [id])
 
-  // Atribución a vendedor (no necesitas PIN aquí; ya traés el usuario por pin en caja)
+  // Atribución a vendedor
   employeeId String?
   employee   User?   @relation(fields: [employeeId], references: [id])
 
@@ -557,6 +909,10 @@ model Sale {
 
   posId String?
   pos   AfipPointOfSale? @relation(fields: [posId], references: [id])
+
+  // Numeración y referencia
+  saleNumber String? // Número interno de venta
+  reference  String? // Referencia adicional
 
   // Totales de la venta (congelados al momento)
   subtotal      Decimal  @default(0) @db.Decimal(12, 2)
@@ -567,16 +923,33 @@ model Sale {
   // AFIP
   ptoVta     Int
   cbteTipo   Int
+  cbteNro    Int? // Número de comprobante AFIP
   cae        String?
   caeVto     DateTime?
   afipStatus String?
+  afipError  String? // Para almacenar errores de AFIP
+
+  // Estado de la venta
+  status        String @default("DRAFT") // DRAFT, CONFIRMED, CANCELLED
+  paymentStatus String @default("PENDING") // PENDING, PARTIAL, PAID
+
+  // Información adicional
+  notes String?
+
+  // Fechas importantes
+  saleDate DateTime  @default(now()) // Fecha de la venta
+  dueDate  DateTime? // Fecha de vencimiento (para ventas a crédito)
 
   items SaleItem[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([tenantId, saleNumber]) // Número de venta único por tenant
   @@index([tenantId])
+  @@index([tenantId, status])
+  @@index([tenantId, paymentStatus])
+  @@index([tenantId, saleDate])
   @@index([employeeId])
   @@index([customerId])
   @@index([posId])
@@ -595,11 +968,13 @@ model SaleItem {
   productId String
   product   Product @relation(fields: [productId], references: [id])
 
-  // Datos “congelados” al momento de vender
+  // Datos "congelados" al momento de vender
   productName String
   skuSnapshot String?
   unitPrice   Decimal  @db.Decimal(12, 2)
+  unitCost    Decimal? @db.Decimal(12, 2) // Para cálculo de rentabilidad
   quantity    Int
+  discount    Decimal? @db.Decimal(5, 2) // Descuento aplicado al item
   ivaRate     Decimal? @db.Decimal(5, 2)
   lineTotal   Decimal  @db.Decimal(12, 2)
 
@@ -610,3 +985,173 @@ model SaleItem {
   @@index([productId])
   @@map("sale_items")
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AUDITORIA Y LOGS (Opcional pero recomendado)
+// ─────────────────────────────────────────────────────────────────────────────
+model AuditLog {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  // Detalles de la acción
+  entityType String // "Product", "Sale", "Customer", etc.
+  entityId   String // ID del registro modificado
+  action     String // "CREATE", "UPDATE", "DELETE"
+
+  // Datos del cambio
+  oldValues Json? // Valores anteriores
+  newValues Json? // Valores nuevos
+  changes   Json? // Solo los campos que cambiaron
+
+  // Metadatos
+  ipAddress String?
+  userAgent String?
+  sessionId String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, entityType, entityId])
+  @@index([tenantId, userId])
+  @@index([tenantId, createdAt])
+  @@map("audit_logs")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CONFIGURACIONES DEL TENANT
+// ─────────────────────────────────────────────────────────────────────────────
+model TenantSettings {
+  id String @id @default(cuid())
+
+  tenantId String @unique
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  // Configuraciones generales
+  businessName    String?
+  businessAddress String?
+  businessPhone   String?
+  businessEmail   String?
+  businessWebsite String?
+
+  // Configuraciones de facturación
+  defaultTaxRate     Decimal? @db.Decimal(5, 2)
+  invoicePrefix      String?  @default("INV")
+  invoiceStartNumber Int?     @default(1)
+  salePrefix         String?  @default("VTA")
+  saleStartNumber    Int?     @default(1)
+
+  // Configuraciones de stock
+  lowStockAlert        Boolean @default(true)
+  negativeStockAllowed Boolean @default(false)
+  autoReduceStock      Boolean @default(true)
+
+  // Configuraciones de precios
+  pricesIncludeTax       Boolean @default(true)
+  allowPriceModification Boolean @default(true)
+  requireCostPrice       Boolean @default(false)
+
+  // Configuraciones de la UI
+  theme          String? @default("light")
+  language       String  @default("es")
+  dateFormat     String  @default("DD/MM/YYYY")
+  timeFormat     String  @default("HH:mm")
+  currency       String  @default("ARS")
+  currencySymbol String  @default("$")
+
+  // Notificaciones
+  emailNotifications    Boolean @default(true)
+  smsNotifications      Boolean @default(false)
+  lowStockNotifications Boolean @default(true)
+  salesNotifications    Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("tenant_settings")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// INVENTARIO Y MOVIMIENTOS DE STOCK
+// ─────────────────────────────────────────────────────────────────────────────
+model StockMovement {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  productId String
+  product   Product @relation(fields: [productId], references: [id])
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id])
+
+  // Detalles del movimiento
+  type      String // "IN", "OUT", "ADJUSTMENT", "TRANSFER", "SALE", "RETURN"
+  quantity  Int // Cantidad (positiva para entradas, negativa para salidas)
+  reason    String? // Motivo del movimiento
+  reference String? // Referencia (ej: número de venta, compra, etc.)
+
+  // Stock antes y después del movimiento
+  stockBefore Int
+  stockAfter  Int
+
+  // Costos (para movimientos de entrada)
+  unitCost  Decimal? @db.Decimal(12, 2)
+  totalCost Decimal? @db.Decimal(12, 2)
+
+  notes String?
+
+  createdAt DateTime @default(now())
+
+  @@index([tenantId, productId])
+  @@index([tenantId, type])
+  @@index([tenantId, createdAt])
+  @@index([productId, createdAt])
+  @@map("stock_movements")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// REPORTES Y MÉTRICAS (Para dashboard)
+// ─────────────────────────────────────────────────────────────────────────────
+model DailySummary {
+  id String @id @default(cuid())
+
+  tenantId String
+  tenant   Tenant @relation(fields: [tenantId], references: [id])
+
+  date DateTime @db.Date
+
+  // Métricas de ventas
+  totalSales    Int     @default(0)
+  totalRevenue  Decimal @default(0) @db.Decimal(12, 2)
+  totalCost     Decimal @default(0) @db.Decimal(12, 2)
+  totalProfit   Decimal @default(0) @db.Decimal(12, 2)
+  averageTicket Decimal @default(0) @db.Decimal(12, 2)
+
+  // Métricas de productos
+  topSellingProduct    String?
+  topSellingProductQty Int?    @default(0)
+  lowStockProducts     Int     @default(0)
+  outOfStockProducts   Int     @default(0)
+
+  // Métricas de clientes
+  newCustomers       Int @default(0)
+  returningCustomers Int @default(0)
+  totalCustomers     Int @default(0)
+
+  // Métricas de usuarios
+  activeUsers Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([tenantId, date])
+  @@index([tenantId, date])
+  @@map("daily_summaries")
+}
+
+
