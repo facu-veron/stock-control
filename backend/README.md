@@ -116,9 +116,10 @@ POST /api/auth/login
 **POST** `/api/sales/create`
 ```json
 {
-  "tipoFactura": "FACTURA_B",
+  "employeeId": "clxy123456789abcdef",
+  "customerId": "clxy987654321fedcba", 
+  "invoiceType": "FACTURA_B",
   "puntoVenta": 1,
-  "concepto": 1,
   "customer": {
     "documentType": "DNI",
     "documentNumber": "12345678",
@@ -126,14 +127,13 @@ POST /api/auth/login
   },
   "items": [
     {
-      "productName": "Producto Test",
+      "productId": "clxy456789123abcdef",
       "quantity": 1,
-      "unitPrice": 121.00
+      "unitPrice": 121.00,
+      "discount": 0
     }
   ],
-  "subtotal": 100.00,
-  "taxTotal": 21.00,
-  "grandTotal": 121.00
+  "notes": "Venta en mostrador"
 }
 ```
 
@@ -141,9 +141,10 @@ POST /api/auth/login
 **POST** `/api/sales/create`
 ```json
 {
-  "tipoFactura": "FACTURA_A",
+  "employeeId": "clxy123456789abcdef",
+  "customerId": "clxy987654321fedcba",
+  "invoiceType": "FACTURA_A", 
   "puntoVenta": 1,
-  "concepto": 1,
   "customer": {
     "documentType": "CUIT",
     "documentNumber": "20123456789",
@@ -154,14 +155,13 @@ POST /api/auth/login
   },
   "items": [
     {
-      "productName": "Servicio Profesional",
+      "productId": "clxy456789123abcdef",
       "quantity": 1,
-      "unitPrice": 100.00
+      "unitPrice": 100.00,
+      "discount": 0
     }
   ],
-  "subtotal": 100.00,
-  "taxTotal": 21.00,
-  "grandTotal": 121.00
+  "notes": "Factura A para empresa"
 }
 ```
 
@@ -169,17 +169,17 @@ POST /api/auth/login
 **POST** `/api/sales/create`
 ```json
 {
-  "tipoFactura": "TICKET",
+  "employeeId": "clxy123456789abcdef",
+  "invoiceType": "TICKET",
   "items": [
     {
-      "productName": "Producto",
+      "productId": "clxy456789123abcdef", 
       "quantity": 2,
-      "unitPrice": 50.00
+      "unitPrice": 50.00,
+      "discount": 0
     }
   ],
-  "subtotal": 100.00,
-  "taxTotal": 21.00,
-  "grandTotal": 121.00
+  "notes": "Venta mostrador"
 }
 ```
 
@@ -248,15 +248,75 @@ type CustomerTaxStatus =
 
 ## 🧪 Casos de Prueba
 
+### Preparación: Obtener IDs necesarios
+
+Antes de realizar las pruebas, necesitas obtener los IDs de empleados y productos:
+
+#### 1. Obtener empleados disponibles
+```bash
+curl -X GET "http://localhost:3001/api/users?role=EMPLOYEE" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+#### 2. Obtener productos disponibles  
+```bash
+curl -X GET "http://localhost:3001/api/products" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
+
+#### 3. Crear un producto de prueba (si es necesario)
+```bash
+curl -X POST http://localhost:3001/api/products \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "name": "Producto Test AFIP",
+    "description": "Producto para testing de facturación",
+    "price": 121.00,
+    "cost": 80.00,
+    "stock": 100,
+    "minStock": 10,
+    "barcode": "1234567890123",
+    "categoryId": "TU_CATEGORIA_ID",
+    "supplierId": "TU_PROVEEDOR_ID"
+  }'
+```
+
+#### 4. Ejemplo de respuesta con IDs reales
+```json
+// GET /api/users?role=EMPLOYEE
+{
+  "users": [
+    {
+      "id": "cmep5z9z00005kr2skx3j3fcq",
+      "name": "Pepito",
+      "email": "pepito@gmail.com"
+    }
+  ]
+}
+
+// GET /api/products  
+{
+  "products": [
+    {
+      "id": "cmep45a9o000akrtgnge1txap",
+      "name": "Pantalon",
+      "price": "350000",
+      "stock": 8
+    }
+  ]
+}
+```
+
 ### Test 1: Factura B - Consumidor Final con DNI
 ```bash
 curl -X POST http://localhost:3001/api/sales/create \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -d '{
-    "tipoFactura": "FACTURA_B",
+    "employeeId": "cmep5z9z00005kr2skx3j3fcq",
+    "invoiceType": "FACTURA_B",
     "puntoVenta": 1,
-    "concepto": 1,
     "customer": {
       "documentType": "DNI",
       "documentNumber": "12345678",
@@ -264,16 +324,17 @@ curl -X POST http://localhost:3001/api/sales/create \
     },
     "items": [
       {
-        "productName": "Producto Test",
+        "productId": "cmep45a9o000akrtgnge1txap",
         "quantity": 1,
-        "unitPrice": 100.00
+        "unitPrice": 100.00,
+        "discount": 0
       }
     ],
-    "subtotal": 100.00,
-    "taxTotal": 21.00,
-    "grandTotal": 121.00
+    "notes": "Test Factura B"
   }'
 ```
+
+**Nota**: Reemplaza los IDs con los obtenidos de tu sistema usando los endpoints de preparación.
 
 **Respuesta Esperada:**
 ```json
@@ -301,9 +362,9 @@ curl -X POST http://localhost:3001/api/sales/create \
   -H "Content-Type: application/json" \
   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
   -d '{
-    "tipoFactura": "FACTURA_A",
+    "employeeId": "cmep5z9z00005kr2skx3j3fcq",
+    "invoiceType": "FACTURA_A",
     "puntoVenta": 1,
-    "concepto": 1,
     "customer": {
       "documentType": "CUIT",
       "documentNumber": "20123456789",
@@ -312,14 +373,13 @@ curl -X POST http://localhost:3001/api/sales/create \
     },
     "items": [
       {
-        "productName": "Servicio",
+        "productId": "cmep45a9o000akrtgnge1txap",
         "quantity": 1,
-        "unitPrice": 100.00
+        "unitPrice": 100.00,
+        "discount": 0
       }
     ],
-    "subtotal": 100.00,
-    "taxTotal": 21.00,
-    "grandTotal": 121.00
+    "notes": "Test Factura A"
   }'
 ```
 
@@ -373,6 +433,27 @@ curl -X GET "http://localhost:3001/api/afip/voucher?number=1&salePoint=1&type=6"
 **Solución**: 
 - Verificar que todas las queries incluyan `tenantId`
 - Revisar middleware de autenticación
+
+### Errores de Validación Comunes
+
+#### Error: "Invalid value employeeId"
+**Causa**: El `employeeId` no existe o no pertenece al tenant.
+**Solución**: 
+- Verificar que el empleado existe: `GET /api/users?role=EMPLOYEE`
+- Usar un ID válido del tenant actual
+
+#### Error: "Invalid value productId"  
+**Causa**: El `productId` no existe o no pertenece al tenant.
+**Solución**:
+- Verificar productos disponibles: `GET /api/products`
+- Crear producto si es necesario: `POST /api/products`
+
+#### Error: "Stock insuficiente"
+**Causa**: No hay stock suficiente del producto.
+**Solución**:
+- Verificar stock actual del producto
+- Ajustar cantidad en la venta
+- Agregar stock al producto
 
 ## 🔒 Seguridad Multitenant
 
