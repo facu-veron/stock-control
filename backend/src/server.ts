@@ -24,10 +24,6 @@ import customersRoutes from "./routes/customers";
 
 // Importar rutas AFIP
 import afipConfigRoutes from "./routes/afip-config";
-import afipTestRoutes from "./routes/afip-test";
-
-// Importar jobs y servicios
-import { initializeAfipTokenRenewal, AfipTokenRenewalJob } from "./jobs/afip-token-renewal.job";
 
 // Middleware de manejo de errores
 import errorHandler from "./middleware/errorHandler";
@@ -47,7 +43,6 @@ class Server {
   private app: Application;
   private server: http.Server | null = null;
   private prisma: PrismaClient;
-  private afipJob: AfipTokenRenewalJob | null = null;
   private readonly PORT: number;
   private readonly isProduction: boolean;
   private shutdownInProgress = false;
@@ -160,7 +155,7 @@ class Server {
           uptime: process.uptime(),
           database: "connected",
           services: {
-            afip: this.afipJob ? "running" : "stopped",
+            afip: "enabled",
           },
           memory: {
             used: Math.round(process.memoryUsage().heapUsed / 1024 / 1024) + " MB",
@@ -190,11 +185,8 @@ class Server {
     // Rutas AFIP
     this.app.use("/api/afip", afipConfigRoutes);
     
-    // Rutas de testing (solo en desarrollo)
+    // Endpoint para ver configuración actual (solo en desarrollo)
     if (!this.isProduction) {
-      this.app.use("/api/afip-test", afipTestRoutes);
-      
-      // Endpoint para ver configuración actual
       this.app.get("/api/debug/config", (req: Request, res: Response) => {
         res.json({
           env: process.env.NODE_ENV,
@@ -267,10 +259,8 @@ class Server {
 
   private async initializeServices(): Promise<void> {
     try {
-      // Inicializar job de AFIP
-      console.log("🔄 Inicializando servicios AFIP...");
-      this.afipJob = initializeAfipTokenRenewal();
-      console.log("✅ Servicios AFIP iniciados");
+      // Servicios AFIP ahora manejados por afip.ts
+      console.log("✅ Servicios AFIP disponibles vía afip.ts");
     } catch (error) {
       console.error("❌ Error inicializando servicios:", error);
       // No es crítico, el servidor puede continuar
@@ -369,11 +359,8 @@ class Server {
         });
       }
 
-      // Detener job de AFIP
-      if (this.afipJob) {
-        this.afipJob.stop();
-        console.log("✅ Job de AFIP detenido");
-      }
+      // AFIP services ya no requieren limpieza manual
+      console.log("✅ Servicios AFIP finalizados");
 
       // Desconectar de la base de datos
       await this.prisma.$disconnect();

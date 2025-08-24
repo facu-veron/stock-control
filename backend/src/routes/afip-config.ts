@@ -1,15 +1,13 @@
 // src/routes/afip-config.ts
-import { Router } from "express";
+import { Router, Response } from "express";
 import { prisma } from "../lib/prisma";
 import { authenticateToken, requireAdmin } from "../middleware/auth";
 import { body, validationResult } from "express-validator";
 import multer from "multer";
 import type { AuthenticatedRequest } from "../types";
-import { WsaaService } from "../services/arca/wsaa.service";
-import { createWsfeClient, getLastVoucher, buildFeCAERequest, solicitarCAE } from "../services/arca/wsfe.service";
+import { afipService } from "../services/afip.service";
 
 const router = Router();
-const wsaaService = new WsaaService();
 
 // Configuración de multer para archivos
 const upload = multer({ 
@@ -146,25 +144,10 @@ router.post(
         }
       });
 
-      // ... existing code ...
-try {
-  const token = await wsaaService.getOrRenewToken(tenantId, true);
-  if (token) {
-    return res.json({ 
-      success: true, 
-      message: "Credenciales actualizadas y validadas correctamente",
-      tokenExpiry: token.expirationTime
-    });
-  }
-} catch (tokenError) {
-  return res.json({ 
-    success: true, 
-    warning: "Credenciales guardadas pero no se pudo validar con AFIP",
-    error: String(tokenError)
-  });
-}
-// Add this line to cover all code paths:
-return res.status(500).json({ success: false, error: "No se pudo validar ni guardar el token" });
+      return res.json({ 
+        success: true, 
+        message: "Credenciales actualizadas correctamente"
+      });
 
       // ⚠️ Aquí falta un return si no hay `token`
     } catch (error) {
@@ -205,8 +188,7 @@ router.post(
         data: { mode }
       });
 
-      // Limpiar cache de token al cambiar de modo
-      wsaaService.clearTokenCache(tenantId);
+      // afip.ts maneja automáticamente los tokens
 
       return res.json({ 
         success: true, 
@@ -238,20 +220,10 @@ router.post(
     const tenantId = req.user!.tenantId;
 
     try {
-      const token = await wsaaService.getOrRenewToken(tenantId, true);
-      
-      if (token) {
-        return res.json({
-          success: true,
-          message: "Token renovado exitosamente",
-          expiresAt: token.expirationTime,
-          expiresIn: `${Math.floor((new Date(token.expirationTime).getTime() - Date.now()) / 1000 / 60)} minutos`
-        });
-      }
-
-      return res.status(500).json({ 
-        success: false, 
-        error: "No se pudo renovar el token" 
+      // afip.ts maneja automáticamente los tokens
+      return res.json({
+        success: true,
+        message: "Los tokens AFIP se manejan automáticamente con afip.ts"
       });
     } catch (error) {
       console.error("Error renovando token:", error);
@@ -294,6 +266,87 @@ router.get(
 );
 
 /**
+ * POST /api/afip/points-of-sale
+ * Crea un punto de venta manualmente
+ */
+router.post(
+  "/points-of-sale",
+  authenticateToken,
+  requireAdmin,
+  [
+    body("ptoVta").isInt({ min: 1 }).withMessage("Punto de venta debe ser un número mayor a 0"),
+    body("description").optional().isString().withMessage("Descripción debe ser texto"),
+    body("active").optional().isBoolean().withMessage("Active debe ser verdadero o falso")
+  ],
+  async (req: AuthenticatedRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        success: false,
+        error: "Datos inválidos",
+        details: errors.array()
+      });
+    }
+
+    const tenantId = req.user!.tenantId;
+    const { ptoVta, description, active = true } = req.body;
+
+    try {
+      // Verificar que no exista ya
+      const existing = await prisma.afipPointOfSale.findUnique({
+        where: {
+          tenantId_ptoVta: {
+            tenantId,
+            ptoVta
+          }
+        }
+      });
+
+      if (existing) {
+        return res.status(400).json({
+          success: false,
+          error: `El punto de venta ${ptoVta} ya existe`
+        });
+      }
+
+      // Crear punto de venta
+      const pointOfSale = await prisma.afipPointOfSale.create({
+        data: {
+          tenantId,
+          ptoVta,
+          description: description || `Punto de Venta ${ptoVta}`,
+          active
+        }
+      });
+
+      // Registrar en audit log
+      await prisma.auditLog.create({
+        data: {
+          tenantId,
+          userId: req.user!.id,
+          entityType: "AfipPointOfSale",
+          entityId: pointOfSale.id,
+          action: "CREATE",
+          newValues: pointOfSale
+        }
+      });
+
+      return res.json({
+        success: true,
+        message: "Punto de venta creado exitosamente",
+        pointOfSale
+      });
+    } catch (error) {
+      console.error("Error creando punto de venta:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Error interno del servidor"
+      });
+    }
+  }
+);
+
+/**
  * POST /api/afip/points-of-sale/sync
  * Sincroniza los puntos de venta con AFIP
  */
@@ -309,17 +362,10 @@ router.post(
         where: { tenantId },
         include: { token: true, tenant: true }
       });
-      if (!credential || !credential.token || !credential.tenant) throw new Error('Credenciales AFIP no configuradas');
-      const prod = credential.tenant.mode === 'PRODUCCION';
-      const client = await createWsfeClient(prod);
-      const [result] = await client.FEParamGetPtosVentaAsync({
-        Auth: {
-          Token: credential.token.token,
-          Sign: credential.token.sign,
-          Cuit: Number(credential.tenant.cuit)
-        }
-      });
-      const puntosVentaAfip = result?.FEParamGetPtosVentaResult?.ResultGet || [];      
+      if (!credential || !credential.tenant) throw new Error('Credenciales AFIP no configuradas');
+      
+      // Usar afip.ts para obtener puntos de venta
+      const puntosVentaAfip = await afipService.getPointsOfSale(tenantId);      
       if (!puntosVentaAfip || puntosVentaAfip.length === 0) {
         return res.json({
           success: false,
@@ -421,8 +467,7 @@ router.delete(
         where: { tenantId }
       });
 
-      // Limpiar cache
-      wsaaService.clearTokenCache(tenantId);
+      // afip.ts maneja automáticamente los tokens
 
       // Registrar en audit log
       await prisma.auditLog.create({

@@ -5,7 +5,7 @@ import { body, validationResult } from "express-validator";
 import { authenticateToken } from "../middleware/auth";
 import type { AuthenticatedRequest } from "../types";
 import bcrypt from "bcryptjs";
-import { createWsfeClient, getLastVoucher, buildFeCAERequest, solicitarCAE, procesarFacturacionAFIP, obtenerPuntosVentaAFIP } from "../services/arca/wsfe.service";
+import { afipService } from "../services/afip.service";
 
 
 const router = Router();
@@ -259,11 +259,12 @@ router.post(
       // Si es factura electrónica, procesarla con AFIP
       if (invoiceType !== "TICKET" && puntoVenta) {
         try {
-          const comprobanteRespuesta = await procesarFacturacionAFIP({
+          const comprobanteRespuesta = await afipService.procesarFacturacionFromSale({
             tenantId,
             sale,
             tipoFactura: invoiceType as any,
-            puntoVenta
+            puntoVenta,
+            customer: req.body.customer // Pasar customer inline si viene en el body
           });
 
           if (comprobanteRespuesta) {
@@ -292,9 +293,9 @@ router.post(
               message: "Venta creada y factura electrónica generada",
               sale: updatedSale,
               afip: {
-                cae: comprobanteRespuesta.CAE,
-                vencimiento: comprobanteRespuesta.CAEFchVto,
-                numero: updatedSale?.cbteNro
+                cae: comprobanteRespuesta.cae,
+                vencimiento: comprobanteRespuesta.caeFchVto,
+                numero: comprobanteRespuesta.cbteNumero
               }
             });
           }
@@ -339,7 +340,7 @@ router.get(
 
     try {
       // Obtener puntos de venta desde AFIP
-      const puntosVentaAfip = await obtenerPuntosVentaAFIP(tenantId);
+      const puntosVentaAfip = await afipService.getPointsOfSale(tenantId);
       
       // Obtener puntos de venta guardados en BD
       const puntosVentaLocal = await prisma.afipPointOfSale.findMany({
@@ -416,7 +417,7 @@ router.post(
       }
 
       // Procesar facturación
-      const comprobanteRespuesta = await procesarFacturacionAFIP({
+      const comprobanteRespuesta = await afipService.procesarFacturacionFromSale({
         tenantId,
         sale,
         tipoFactura: invoiceType,
@@ -437,8 +438,8 @@ router.post(
           message: "Factura electrónica generada exitosamente",
           sale: updatedSale,
           afip: {
-            cae: comprobanteRespuesta.CAE,
-            vencimiento: comprobanteRespuesta.CAEFchVto
+            cae: comprobanteRespuesta.cae,
+            vencimiento: comprobanteRespuesta.caeFchVto
           }
         });
       }

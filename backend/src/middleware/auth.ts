@@ -89,17 +89,11 @@ export const authenticateToken = async (
       id: user.id,
       email: user.email,
       name: user.name,
-      firstName: user.firstName,
-      lastName: user.lastName,
       role: user.role,
-      active: user.active,
       tenantId: user.tenantId,
-      timezone: user.timezone,
-      avatarUrl: user.avatarUrl,
-      lastLoginAt: user.lastLoginAt,
     }
 
-    req.tenant = user.Tenant
+    req.tenant = user.Tenant as any;
 
     next()
   } catch (error) {

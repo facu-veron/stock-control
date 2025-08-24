@@ -1,242 +1,475 @@
-# Sistema de Inventario - Backend
+# Sistema POS Multitenant con Facturación Electrónica AFIP
 
-Backend desarrollado en TypeScript con Express, Prisma y SQLite para el sistema de inventario.
+Sistema de punto de venta multitenant con integración a AFIP para facturación electrónica usando `afip.ts`.
 
-## 🚀 Características
+## 🚀 Características Principales
 
-- **TypeScript**: Tipado estático para mayor seguridad y mejor desarrollo
-- **Express.js**: Framework web rápido y minimalista
-- **Prisma**: ORM moderno para TypeScript y Node.js
-- **SQLite**: Base de datos ligera y fácil de usar
-- **JWT**: Autenticación basada en tokens
-- **Bcrypt**: Encriptación de contraseñas
-- **Express Validator**: Validación de datos de entrada
-- **CORS**: Configuración de políticas de origen cruzado
-- **Helmet**: Middleware de seguridad
+- **Multitenant**: Aislamiento completo de datos por tenant
+- **Facturación Electrónica AFIP**: Integración completa con `afip.ts`
+- **Gestión de Inventario**: Control de stock y productos
+- **Ventas**: Creación de ventas con facturación automática
+- **Clientes**: Gestión de clientes con datos fiscales
+- **Autenticación JWT**: Sistema de autenticación seguro
+- **Base de Datos**: PostgreSQL con Prisma ORM
 
-## 📋 Requisitos
+## 📋 Requisitos Previos
 
-- Node.js 18+ 
-- npm o yarn
+1. **Node.js** >= 18
+2. **PostgreSQL** 
+3. **Certificados AFIP** (producción o testing)
+4. **CUIT** habilitado para facturación electrónica
 
 ## 🛠️ Instalación
 
-1. **Clonar el repositorio**
-\`\`\`bash
-git clone <url-del-repositorio>
-cd backend
-\`\`\`
-
-2. **Instalar dependencias**
-\`\`\`bash
+```bash
+# Instalar dependencias
 npm install
-\`\`\`
 
-3. **Configurar variables de entorno**
-\`\`\`bash
+# Configurar variables de entorno
 cp .env.example .env
-\`\`\`
 
-Editar el archivo `.env` con tus configuraciones:
-\`\`\`env
-DATABASE_URL="file:./dev.db"
-JWT_SECRET="tu-jwt-secret-muy-seguro"
-JWT_EXPIRES_IN="7d"
-PORT=3001
-NODE_ENV="development"
-FRONTEND_URL="http://localhost:3000"
-\`\`\`
+# Generar cliente Prisma
+npx prisma generate
 
-4. **Configurar la base de datos**
-\`\`\`bash
-# Generar el cliente de Prisma
-npm run db:generate
+# Ejecutar migraciones
+npx prisma migrate dev
 
-# Crear y aplicar migraciones
-npm run db:push
-
-# Poblar la base de datos con datos de ejemplo
-npm run db:seed
-\`\`\`
-
-## 🏃‍♂️ Uso
-
-### Desarrollo
-\`\`\`bash
+# Iniciar en desarrollo
 npm run dev
-\`\`\`
+```
 
-### Producción
-\`\`\`bash
-# Compilar TypeScript
-npm run build
+## ⚙️ Variables de Entorno
 
-# Iniciar servidor
-npm start
-\`\`\`
+```env
+# Base de datos
+DATABASE_URL="postgresql://usuario:password@localhost:5432/inventory_db"
 
-### Otros comandos útiles
-\`\`\`bash
-# Verificar tipos sin compilar
-npm run type-check
+# JWT
+JWT_SECRET="tu_jwt_secret_muy_seguro"
 
-# Abrir Prisma Studio (interfaz visual para la DB)
-npm run db:studio
+# Servidor
+PORT=3001
+NODE_ENV=development
 
-# Regenerar cliente de Prisma
-npm run db:generate
-\`\`\`
+# AFIP (opcional para testing manual)
+AFIP_CUIT=20123456789
+AFIP_CERT_PATH=./certs/cert.pem
+AFIP_KEY_PATH=./certs/private_key.pem
+AFIP_PRODUCTION=false
+```
 
-## 📚 API Endpoints
+## 🏗️ Configuración AFIP
+
+### 1. Certificados AFIP
+
+Coloca tus certificados en `/certs/`:
+```
+/certs/
+  ├── cert.pem        # Certificado público
+  └── private_key.pem # Clave privada
+```
+
+### 2. Configuración por Tenant
+
+Cada tenant debe tener configurados sus credenciales AFIP:
+
+**POST** `/api/afip/credentials`
+```json
+{
+  "cuit": "20123456789",
+  "certPem": "-----BEGIN CERTIFICATE-----\n...",
+  "keyPem": "-----BEGIN PRIVATE KEY-----\n...",
+  "isProduction": false
+}
+```
+
+### 3. Configuración de Puntos de Venta
+
+#### Opción A: Crear manualmente
+**POST** `/api/afip/points-of-sale`
+```json
+{
+  "number": 1,
+  "description": "Punto de Venta Principal",
+  "isActive": true
+}
+```
+
+#### Opción B: Sincronizar desde AFIP
+**POST** `/api/afip/points-of-sale/sync`
+
+## 📡 Endpoints Principales
 
 ### Autenticación
-- `POST /api/auth/register` - Registrar usuario
-- `POST /api/auth/login` - Iniciar sesión
-- `GET /api/auth/me` - Obtener usuario actual
-- `POST /api/auth/logout` - Cerrar sesión
+```bash
+# Login
+POST /api/auth/login
+{
+  "email": "admin@empresa.com",
+  "password": "password"
+}
+```
 
-### Categorías
-- `GET /api/categories` - Listar categorías
-- `GET /api/categories/:id` - Obtener categoría por ID
-- `POST /api/categories` - Crear categoría (Admin)
-- `PUT /api/categories/:id` - Actualizar categoría (Admin)
-- `DELETE /api/categories/:id` - Eliminar categoría (Admin)
+### Ventas con Facturación Electrónica
+
+#### Crear Venta con Factura B (Consumidor Final)
+**POST** `/api/sales/create`
+```json
+{
+  "tipoFactura": "FACTURA_B",
+  "puntoVenta": 1,
+  "concepto": 1,
+  "customer": {
+    "documentType": "DNI",
+    "documentNumber": "12345678",
+    "taxStatus": "CONSUMIDOR_FINAL"
+  },
+  "items": [
+    {
+      "productName": "Producto Test",
+      "quantity": 1,
+      "unitPrice": 121.00
+    }
+  ],
+  "subtotal": 100.00,
+  "taxTotal": 21.00,
+  "grandTotal": 121.00
+}
+```
+
+#### Crear Venta con Factura A (Responsable Inscripto)
+**POST** `/api/sales/create`
+```json
+{
+  "tipoFactura": "FACTURA_A",
+  "puntoVenta": 1,
+  "concepto": 1,
+  "customer": {
+    "documentType": "CUIT",
+    "documentNumber": "20123456789",
+    "taxStatus": "RESPONSABLE_INSCRIPTO",
+    "name": "Empresa Cliente SA",
+    "email": "cliente@empresa.com",
+    "address": "Dirección 123"
+  },
+  "items": [
+    {
+      "productName": "Servicio Profesional",
+      "quantity": 1,
+      "unitPrice": 100.00
+    }
+  ],
+  "subtotal": 100.00,
+  "taxTotal": 21.00,
+  "grandTotal": 121.00
+}
+```
+
+#### Crear Venta Sin Facturación (Ticket)
+**POST** `/api/sales/create`
+```json
+{
+  "tipoFactura": "TICKET",
+  "items": [
+    {
+      "productName": "Producto",
+      "quantity": 2,
+      "unitPrice": 50.00
+    }
+  ],
+  "subtotal": 100.00,
+  "taxTotal": 21.00,
+  "grandTotal": 121.00
+}
+```
+
+### Gestión de Clientes
+
+#### Crear Cliente
+**POST** `/api/customers`
+```json
+{
+  "name": "Juan Pérez",
+  "documentType": "DNI",
+  "documentNumber": "12345678",
+  "taxStatus": "CONSUMIDOR_FINAL",
+  "email": "juan@email.com",
+  "phoneNumber": "+54911234567",
+  "address": "Calle Falsa 123"
+}
+```
 
 ### Productos
-- `GET /api/products` - Listar productos
-- `GET /api/products/:id` - Obtener producto por ID
-- `POST /api/products` - Crear producto (Admin)
-- `PUT /api/products/:id` - Actualizar producto (Admin)
-- `PATCH /api/products/:id/stock` - Actualizar stock
-- `DELETE /api/products/:id` - Eliminar producto (Admin)
-- `GET /api/products/reports/low-stock` - Productos con stock bajo
 
-### Salud del sistema
-- `GET /api/health` - Estado del servidor
+#### Crear Producto
+**POST** `/api/products`
+```json
+{
+  "name": "Producto Test",
+  "description": "Descripción del producto",
+  "price": 121.00,
+  "cost": 80.00,
+  "stock": 100,
+  "minStock": 10,
+  "barcode": "1234567890123",
+  "categoryId": "categoria_id",
+  "supplierId": "proveedor_id"
+}
+```
 
-## 🔐 Autenticación
+## 🔧 Configuración AFIP Avanzada
 
-El sistema utiliza JWT (JSON Web Tokens) para la autenticación. Los tokens deben enviarse en el header `Authorization`:
+### Tipos de Comprobante
+- **1**: Factura A
+- **6**: Factura B  
+- **11**: Factura C
 
-\`\`\`
-Authorization: Bearer <token>
-\`\`\`
+### Tipos de Documento
+- **80**: CUIT
+- **96**: DNI
+- **99**: Consumidor Final
 
-## 👥 Roles de Usuario
+### Condiciones IVA del Receptor
+- **1**: Responsable Inscripto
+- **4**: Sujeto Exento
+- **5**: Consumidor Final
+- **6**: Responsable Monotributo
+- **7**: No Categorizado
 
-- **ADMIN**: Acceso completo al sistema
-- **EMPLOYEE**: Acceso limitado (solo lectura en la mayoría de endpoints)
+### Estados Fiscales del Cliente
+```typescript
+type CustomerTaxStatus = 
+  | "RESPONSABLE_INSCRIPTO"
+  | "MONOTRIBUTO"
+  | "EXENTO"
+  | "CONSUMIDOR_FINAL"
+  | "NO_CATEGORIZADO"
+```
 
-## 📊 Base de Datos
+## 🧪 Casos de Prueba
 
-### Modelos principales:
+### Test 1: Factura B - Consumidor Final con DNI
+```bash
+curl -X POST http://localhost:3001/api/sales/create \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "tipoFactura": "FACTURA_B",
+    "puntoVenta": 1,
+    "concepto": 1,
+    "customer": {
+      "documentType": "DNI",
+      "documentNumber": "12345678",
+      "taxStatus": "CONSUMIDOR_FINAL"
+    },
+    "items": [
+      {
+        "productName": "Producto Test",
+        "quantity": 1,
+        "unitPrice": 100.00
+      }
+    ],
+    "subtotal": 100.00,
+    "taxTotal": 21.00,
+    "grandTotal": 121.00
+  }'
+```
 
-- **User**: Usuarios del sistema
-- **Category**: Categorías de productos
-- **Product**: Productos del inventario
+**Respuesta Esperada:**
+```json
+{
+  "success": true,
+  "message": "Venta creada y factura electrónica generada",
+  "sale": {
+    "id": "...",
+    "cae": "67890123456789",
+    "caeVto": "2025-09-03T00:00:00.000Z",
+    "cbteNro": 1,
+    "status": "COMPLETED"
+  },
+  "afip": {
+    "cae": "67890123456789",
+    "vencimiento": "20250903",
+    "numero": 1
+  }
+}
+```
 
-### Relaciones:
-- Un producto pertenece a una categoría
-- Una categoría puede tener múltiples productos
+### Test 2: Factura A - Responsable Inscripto
+```bash
+curl -X POST http://localhost:3001/api/sales/create \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+  -d '{
+    "tipoFactura": "FACTURA_A",
+    "puntoVenta": 1,
+    "concepto": 1,
+    "customer": {
+      "documentType": "CUIT",
+      "documentNumber": "20123456789",
+      "taxStatus": "RESPONSABLE_INSCRIPTO",
+      "name": "Empresa SA"
+    },
+    "items": [
+      {
+        "productName": "Servicio",
+        "quantity": 1,
+        "unitPrice": 100.00
+      }
+    ],
+    "subtotal": 100.00,
+    "taxTotal": 21.00,
+    "grandTotal": 121.00
+  }'
+```
 
-## 🛡️ Seguridad
+### Test 3: Obtener Puntos de Venta
+```bash
+curl -X GET http://localhost:3001/api/afip/points-of-sale \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
 
-- Contraseñas hasheadas con bcrypt
-- Validación de datos de entrada
-- Middleware de seguridad con Helmet
-- CORS configurado
-- Rate limiting (opcional)
+### Test 4: Consultar Comprobante
+```bash
+curl -X GET "http://localhost:3001/api/afip/voucher?number=1&salePoint=1&type=6" \
+  -H "Authorization: Bearer YOUR_JWT_TOKEN"
+```
 
-## 🧪 Datos de Prueba
+## ❌ Errores Comunes y Soluciones
 
-Después de ejecutar `npm run db:seed`, tendrás acceso a:
+### Error 10246: "Campo Condicion Frente al IVA del receptor es obligatorio"
+**Causa**: Falta el campo `CondicionIVAReceptorId` en la request a AFIP.
+**Solución**: 
+- Asegurar que el cliente tenga `taxStatus` correcto
+- Verificar que se esté mapeando correctamente en `afip.service.ts`
 
-**Usuario Administrador:**
-- Email: `admin@inventario.com`
-- Contraseña: `admin123`
+### Error 10013: "No existe una solicitud de CAE de Comprobantes Electrónicos" 
+**Causa**: El punto de venta no está habilitado para ese tipo de comprobante.
+**Solución**: 
+- Verificar en AFIP que el punto de venta esté habilitado
+- Sincronizar puntos de venta: `POST /api/afip/points-of-sale/sync`
 
-**Usuario Empleado:**
-- Email: `empleado@inventario.com`
-- Contraseña: `empleado123`
+### Error 10015: "El punto de venta no se encuentra habilitado"
+**Causa**: Punto de venta no configurado en AFIP.
+**Solución**: 
+- Crear punto de venta en portal AFIP
+- Sincronizar: `POST /api/afip/points-of-sale/sync`
 
-## 📁 Estructura del Proyecto
+### Error 602: "Sin Resultados"
+**Causa**: No hay datos para mostrar (ej: puntos de venta).
+**Solución**: 
+- Configurar puntos de venta en AFIP
+- El sistema maneja este error devolviendo array vacío
 
-\`\`\`
-backend/
-├── src/
-│   ├── middleware/     # Middleware personalizado
-│   ├── routes/         # Rutas de la API
-│   ├── types/          # Tipos de TypeScript
-│   ├── server.ts       # Servidor principal
-│   └── seed.ts         # Script de población de datos
-├── prisma/
-│   └── schema.prisma   # Esquema de la base de datos
-├── dist/               # Código compilado
-├── package.json
-├── tsconfig.json       # Configuración de TypeScript
-└── README.md
-\`\`\`
+### CAE Vacío/Null
+**Causa**: AFIP rechazó la factura por errores de validación.
+**Solución**: 
+- Revisar `afipError` en la respuesta
+- Verificar datos del cliente y estado fiscal
+- Para Factura A, el cliente DEBE tener CUIT
 
-## 🐛 Debugging
+### Error de Multitenancy
+**Causa**: Datos se están cruzando entre tenants.
+**Solución**: 
+- Verificar que todas las queries incluyan `tenantId`
+- Revisar middleware de autenticación
 
-Para debugging, puedes usar:
+## 🔒 Seguridad Multitenant
 
-\`\`\`bash
-# Logs detallados
-DEBUG=* npm run dev
+### Aislamiento de Datos
+- Todas las operaciones filtran por `tenantId`
+- JWT incluye información del tenant
+- Middleware valida permisos por tenant
 
-# Ver la base de datos
-npm run db:studio
-\`\`\`
+### Validaciones
+```typescript
+// Ejemplo de validación en controllers
+const { tenantId } = req.user;
+const sale = await prisma.sale.findFirst({
+  where: { 
+    id: saleId,
+    tenantId // ¡CRÍTICO: Siempre incluir tenantId!
+  }
+});
+```
 
-## 📝 Notas de Desarrollo
+## 📊 Estructura de Respuestas
 
-- El servidor se reinicia automáticamente en desarrollo con `ts-node-dev`
-- Los tipos se generan automáticamente desde el esquema de Prisma
-- Todas las rutas están protegidas por autenticación excepto login y register
-- Los errores se manejan centralizadamente con middleware personalizado
+### Venta Exitosa
+```json
+{
+  "success": true,
+  "message": "Venta creada y factura electrónica generada",
+  "sale": {
+    "id": "...",
+    "tenantId": "...",
+    "cae": "67890123456789",
+    "caeVto": "2025-09-03T00:00:00.000Z",
+    "cbteNro": 1,
+    "status": "COMPLETED",
+    "afipStatus": null,
+    "afipError": null
+  },
+  "afip": {
+    "cae": "67890123456789",
+    "vencimiento": "20250903", 
+    "numero": 1
+  }
+}
+```
 
-## 🚀 Despliegue
+### Venta con Error AFIP
+```json
+{
+  "success": true,
+  "warning": "Venta creada pero hubo un error con AFIP",
+  "sale": {
+    "id": "...",
+    "cae": null,
+    "caeVto": null,
+    "status": "DRAFT",
+    "afipError": "Factura rechazada por AFIP. Errores: [...]"
+  }
+}
+```
 
-Para producción, asegúrate de:
+## 🚨 Troubleshooting
 
-1. Configurar variables de entorno de producción
-2. Usar una base de datos más robusta (PostgreSQL, MySQL)
-3. Configurar HTTPS
-4. Implementar rate limiting
-5. Configurar logs apropiados
-6. Usar un proceso manager como PM2
+### Debug AFIP
+Los logs incluyen información detallada:
+```
+🔄 Iniciando facturación electrónica para tenant: xxx
+📋 Datos de factura: {...}
+🏢 Tenant encontrado: empresa CUIT: 20123456789
+🔍 Resolviendo CondicionIVAReceptorId: {...}
+✅ Heurística por DocTipo (99/96 - CF): 5
+📝 Datos de factura a enviar a AFIP: {...}
+🚀 Enviando factura a AFIP...
+✅ Respuesta de AFIP: {...}
+```
 
-## 📞 Soporte
+### Verificar Configuración
+1. **Credenciales AFIP**: `GET /api/afip/credentials`
+2. **Puntos de Venta**: `GET /api/afip/points-of-sale`
+3. **Última factura**: `GET /api/afip/last-voucher?salePoint=1&type=6`
 
-Si encuentras algún problema, revisa:
+### Testing Environment
+- Usar certificados de testing de AFIP
+- `isProduction: false` en credenciales
+- Los CAE de testing NO son válidos en producción
 
-1. Los logs del servidor
-2. La configuración de variables de entorno
-3. La conexión a la base de datos
-4. Los permisos de usuario
+## 📈 Monitoreo
 
-Para más ayuda, consulta la documentación de:
-- [Express.js](https://expressjs.com/)
-- [Prisma](https://www.prisma.io/docs/)
-- [TypeScript](https://www.typescriptlang.org/docs/)
-\`\`\`
+### Health Check
+```bash
+curl http://localhost:3001/api/health
+```
 
-Ahora el backend está completamente en TypeScript con:
+### Logs importantes
+- Errores AFIP se registran en consola
+- Ventas con errores se marcan como `DRAFT`
+- Auditoría completa en tabla `AuditLog`
 
-✅ **Tipado completo** - Todos los archivos tienen tipos explícitos
-✅ **Configuración de TypeScript** - tsconfig.json optimizado
-✅ **Scripts actualizados** - Para desarrollo y producción
-✅ **Interfaces y tipos** - Definidos en archivo separado
-✅ **Validación mejorada** - Con tipos en tiempo de compilación
-✅ **Mejor desarrollo** - Con ts-node-dev para hot reload
-✅ **Documentación completa** - README actualizado
+---
 
-Para usar el backend:
-
-1. `cd backend`
-2. `npm install`
-3. `npm run db:generate`
-4. `npm run db:push`
-5. `npm run db:seed`
-6. `npm run dev`
+**Importante**: Este es un sistema multitenant. NUNCA omitas el `tenantId` en las queries para evitar cruces de datos entre clientes.

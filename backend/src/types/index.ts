@@ -31,14 +31,8 @@ export interface AuthenticatedUser {
   id: string
   email: string
   name: string
-  firstName?: string | null
-  lastName?: string | null
   role: Role
-  active: boolean
   tenantId: string
-  timezone?: string | null
-  avatarUrl?: string | null
-  lastLoginAt?: Date | null
 }
 
 export interface TenantInfo {
