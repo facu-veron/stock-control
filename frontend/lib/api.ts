@@ -75,6 +75,7 @@ export interface Product {
 export interface LoginRequest {
   email: string
   password: string
+  tenantName?: string
 }
 
 export interface RegisterRequest {
@@ -145,6 +146,21 @@ export interface UpdateEmployeeRequest {
   active?: boolean
 }
 
+export interface CreateSaleRequest {
+  employeeId: string;
+  customerId?: string;
+  items: Array<{
+    productId: string;
+    quantity: number;
+    unitPrice: number;
+    discount?: number;
+  }>;
+  invoiceType?: string;
+  puntoVenta?: number;
+  notes?: string;
+  discount?: number;
+}
+
 // Tipos para las respuestas
 export interface ApiResponse<T> {
   success: boolean
@@ -204,14 +220,6 @@ export const register = async (userData: RegisterRequest): Promise<AuthResponse>
     return response.data
   }
   throw new Error(response.error || "Registration failed")
-}
-
-export const getMe = async (): Promise<User> => {
-  const response = (await fetchApi<User>("/auth/me")) as ApiResponse<User>
-  if (response.success) {
-    return response.data
-  }
-  throw new Error(response.error || "Failed to get profile")
 }
 
 // Products API - Corregido para manejar la respuesta paginada correctamente
@@ -288,11 +296,15 @@ export const deleteProduct = async (id: string): Promise<void> => {
 
 // Categories API
 export const getCategories = async (): Promise<Category[]> => {
-  const response = (await fetchApi<Category[]>("/categories")) as ApiResponse<Category[]>
-  if (response.success) {
-    return response.data
+  const response = await fetchApi<{items: Category[], total: number, take: number, skip: number}>("/categories")
+  
+  if ('success' in response && response.success) {
+    // La respuesta tiene la estructura: { success: true, data: { items: [...], total, take, skip } }
+    const apiResponse = response as ApiResponse<{items: Category[], total: number, take: number, skip: number}>
+    return apiResponse.data.items // <- Aquí está el cambio clave
   }
-  throw new Error(response.error || "Failed to fetch categories")
+  
+  throw new Error("Failed to fetch categories")
 }
 
 export const getCategoryById = async (id: string): Promise<Category> => {
@@ -448,4 +460,15 @@ export const createTag = async (tag: Omit<Tag, "id">): Promise<Tag> => {
     return response.data
   }
   throw new Error(response.error || "Failed to create tag")
+}
+
+export const createSale = async (sale: CreateSaleRequest) => {
+  const response = await fetchApi<any>("/sales/create", {
+    method: "POST",
+    body: JSON.stringify(sale),
+  }) as ApiResponse<any>;
+  if (response.success) {
+    return response.data;
+  }
+  throw new Error(response.error || "Failed to create sale");
 }

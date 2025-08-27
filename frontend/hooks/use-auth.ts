@@ -4,15 +4,9 @@ import { useEffect } from "react"
 import { useAuthStore } from "@/stores/auth-store"
 
 export function useAuth() {
-  const { user, isAuthenticated, isLoading, error, login, register, logout, getProfile, clearError } = useAuthStore()
+  const { user, isAuthenticated, isLoading, error, login, register, logout, clearError } = useAuthStore()
 
-  // Verificar si hay un token guardado al cargar la aplicación
-  useEffect(() => {
-    const token = localStorage.getItem("auth_token")
-    if (token && !isAuthenticated && !isLoading) {
-      getProfile()
-    }
-  }, [isAuthenticated, isLoading, getProfile])
+  // Eliminar el useEffect que llama a getProfile y la referencia en el return
 
   return {
     user,
@@ -22,7 +16,6 @@ export function useAuth() {
     login,
     register,
     logout,
-    getProfile,
     clearError,
   }
 }

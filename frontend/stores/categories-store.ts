@@ -39,11 +39,11 @@ export const useCategoriesStore = create<CategoriesStore>()(
       fetchCategories: async () => {
         set({ isLoading: true, error: null })
         try {
-          const data = await getCategories()
+          const data = await getCategories() // Ya retorna Category[]
           set({ categories: data, isLoading: false })
         } catch (error) {
           const errorMessage = error instanceof Error ? error.message : "Error al cargar categorías"
-          set({ error: errorMessage, isLoading: false })
+          set({ error: errorMessage, isLoading: false, categories: [] })
           toast({
             title: "Error",
             description: errorMessage,

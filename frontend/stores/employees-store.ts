@@ -25,6 +25,7 @@ interface EmployeesActions {
   updateEmployee: (id: string, data: UpdateEmployeeRequest) => Promise<void>
   deleteEmployee: (id: string) => Promise<void>
   clearError: () => void
+  verifyPin: (pin: string) => Promise<User | null>
 }
 
 type EmployeesStore = EmployeesState & EmployeesActions
@@ -141,6 +142,36 @@ export const useEmployeesStore = create<EmployeesStore>()(
             variant: "destructive",
           })
           throw error
+        }
+      },
+
+      verifyPin: async (pin: string) => {
+        set({ isLoading: true, error: null })
+        try {
+          const res = await fetch("/api/sales/validate-pin", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Bearer ${localStorage.getItem("token")}`,
+            },
+            body: JSON.stringify({ pin }),
+          })
+          const data = await res.json()
+          set({ isLoading: false })
+          if (data.success && data.userId) {
+            // Buscar el empleado en la lista local o recargar
+            let employee = get().employees.find((e) => e.id === data.userId)
+            if (!employee) {
+              employee = await getEmployeeById(data.userId)
+            }
+            return employee
+          } else {
+            set({ error: data.error || "PIN incorrecto" })
+            return null
+          }
+        } catch (error) {
+          set({ error: "Error al verificar PIN", isLoading: false })
+          return null
         }
       },
 

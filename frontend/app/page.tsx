@@ -21,7 +21,7 @@ export const metadata: Metadata = {
 
 export default function DashboardPage() {
   return (
-    <RoleGuard allowedRoles={["admin"]}>
+    <RoleGuard allowedRoles={["ADMIN"]}>
       <div className="flex-col md:flex">
         <div className="border-b">
           <div className="flex h-16 items-center px-4">

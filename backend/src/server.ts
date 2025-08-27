@@ -83,10 +83,11 @@ class Server {
     };
     
     // Rate limiting general
-    this.app.use(createTenantRateLimiter(15 * 60 * 1000, 100)); // 100 requests per 15 min per tenant
-
-    // Rate limiting estricto para auth
-    this.app.use("/api/auth", createTenantRateLimiter(15 * 60 * 1000, 5)); // 5 auth attempts per 15 min
+    if (this.isProduction) {
+      this.app.use(createTenantRateLimiter(15 * 60 * 1000, 100)); // 100 requests per 15 min per tenant
+      // Rate limiting estricto para auth
+      this.app.use("/api/auth", createTenantRateLimiter(15 * 60 * 1000, 5)); // 5 auth attempts per 15 min
+    }
 
     // Logging
     if (this.isProduction) {

@@ -20,6 +20,9 @@ const formSchema = z.object({
   password: z.string().min(6, {
     message: "La contraseña debe tener al menos 6 caracteres.",
   }),
+  empresa: z.string().min(2, {
+    message: "El nombre de la empresa es requerido.",
+  }),
   rememberMe: z.boolean().default(false).optional(),
 })
 
@@ -32,6 +35,7 @@ export function LoginForm() {
     defaultValues: {
       email: "",
       password: "",
+      empresa: "",
       rememberMe: false,
     },
   })
@@ -52,6 +56,7 @@ export function LoginForm() {
       await login({
         email: values.email,
         password: values.password,
+        tenantName: values.empresa,
       })
 
       toast({
@@ -97,6 +102,19 @@ export function LoginForm() {
                 </div>
                 <FormControl>
                   <Input type="password" placeholder="••••••••" {...field} />
+                </FormControl>
+                <FormMessage />
+              </FormItem>
+            )}
+          />
+          <FormField
+            control={form.control}
+            name="empresa"
+            render={({ field }) => (
+              <FormItem>
+                <FormLabel>Empresa</FormLabel>
+                <FormControl>
+                  <Input placeholder="Nombre de la empresa" {...field} />
                 </FormControl>
                 <FormMessage />
               </FormItem>

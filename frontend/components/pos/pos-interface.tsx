@@ -21,6 +21,7 @@ import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Receipt, FileText, User, LogOut, ShoppingCart, Package, Clock } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import type { User as Employee, Customer } from "@/lib/api"
+import { createSale } from "@/lib/api"
 
 // Tipos
 export type CartItem = {
@@ -223,66 +224,55 @@ export function PosInterface() {
   }
 
   // Confirmar factura/ticket
-  const confirmInvoice = (employee: Employee) => {
-    // Simular proceso de facturación electrónica con AFIP (solo para facturas)
-    const processingTime = documentType === "ticket" ? 1000 : 3000
-
-    setTimeout(() => {
-      // Simular una probabilidad de error del 5% solo para facturas
-      const isError = documentType === "factura" && Math.random() < 0.05
-
-      if (isError) {
-        setErrorMessage("Error de comunicación con AFIP. No se pudo obtener el CAE.")
-        setState("error")
-        return
+  const confirmInvoice = async (employee: Employee) => {
+    setState("processing")
+    try {
+      const salePayload = {
+        employeeId: employee.id,
+        customerId: customer?.id,
+        items: cart.map(item => ({
+          productId: item.id,
+          quantity: item.quantity,
+          unitPrice: item.price,
+          discount: item.discount || 0,
+        })),
+        invoiceType: invoiceType === "TICKET" ? "TICKET" : `FACTURA_${invoiceType}`,
+        notes: undefined, // Puedes agregar notas si lo deseas
+        discount: discount > 0 ? discount : undefined,
       }
-
-      const now = new Date()
-      const caeExpirationDate = new Date()
-      caeExpirationDate.setDate(now.getDate() + 10)
-
-      const newInvoice: InvoiceData = {
-        id: `${documentType === "ticket" ? "TKT" : "INV"}-${Math.floor(Math.random() * 10000)}`,
-        number:
-          documentType === "ticket"
-            ? `T-${Math.floor(Math.random() * 100000)
-                .toString()
-                .padStart(8, "0")}`
-            : `0001-${Math.floor(Math.random() * 100000)
-                .toString()
-                .padStart(8, "0")}`,
+      const sale = await createSale(salePayload)
+      setInvoiceData({
+        id: sale.id,
+        number: sale.saleNumber || sale.id,
         type: invoiceType,
-        date: now,
-        customer: customer,
-        employee: employee, // Usar el empleado verificado por PIN
-        items: cart,
-        subtotal: cartTotals.subtotal,
-        tax: cartTotals.tax,
-        total: cartTotals.total,
+        date: new Date(sale.createdAt),
+        customer: sale.customer || customer,
+        employee: sale.employee || employee,
+        items: sale.items.map((item: any) => ({
+          id: item.productId,
+          name: item.product?.name || "",
+          price: item.unitPrice,
+          quantity: item.quantity,
+          tax: item.tax || 0,
+          taxRate: item.ivaRate || 0,
+          discount: item.discount || 0,
+          total: item.lineTotal || 0,
+          category: item.product?.category?.name,
+        })),
+        subtotal: sale.subtotal,
+        tax: sale.taxTotal,
+        total: sale.grandTotal,
         discount: discount,
         paymentMethod: paymentMethod,
-        cae:
-          documentType === "factura"
-            ? Math.floor(Math.random() * 10000000000000000)
-                .toString()
-                .padStart(14, "0")
-            : undefined,
-        caeExpirationDate: documentType === "factura" ? caeExpirationDate : undefined,
-        status: "completed",
-      }
-
-      setInvoiceData(newInvoice)
+        cae: sale.cae,
+        caeExpirationDate: sale.caeVencimiento ? new Date(sale.caeVencimiento) : undefined,
+        status: sale.status,
+      })
       setState("success")
-
-      // Actualizar stock (simulado)
-      updateStock(cart)
-
-      // Guardar la factura/ticket en el historial (simulado)
-      saveInvoiceToHistory(newInvoice)
-
-      // Registrar venta del empleado
-      registerEmployeeSale(employee, newInvoice)
-    }, processingTime)
+    } catch (error: any) {
+      setErrorMessage(error.message || "Error al generar la factura")
+      setState("error")
+    }
   }
 
   // Reintentar facturación en caso de error

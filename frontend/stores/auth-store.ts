@@ -85,36 +85,13 @@ export const useAuthStore = create<AuthStore>()(
         })
       },
 
-      getProfile: async () => {
-        const { token } = get()
-        if (!token) return
-
-        set({ isLoading: true, error: null })
-
-        try {
-          const user = await api.getMe()
-          set({
-            user,
-            isAuthenticated: true,
-            isLoading: false,
-          })
-        } catch (error) {
-          set({
-            error: error instanceof Error ? error.message : "Failed to get profile",
-            isLoading: false,
-            isAuthenticated: false,
-            user: null,
-            token: null,
-          })
-          localStorage.removeItem("token")
-        }
-      },
+      // Eliminar getProfile y referencias a api.getMe
 
       initialize: async () => {
         const { token } = get()
         if (token) {
           localStorage.setItem("token", token)
-          await get().getProfile()
+          // await get().getProfile() // This line is removed as per the edit hint
         }
       },
 

@@ -17,60 +17,7 @@ import type { Customer } from "@/components/pos/pos-interface"
 import { UserRound, Search, Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-
-// Clientes de ejemplo
-const mockCustomers: Customer[] = [
-  {
-    id: "1",
-    name: "Juan Pérez",
-    documentType: "DNI",
-    documentNumber: "28456789",
-    email: "juan.perez@example.com",
-    address: "Av. Corrientes 1234, CABA",
-    taxCondition: "Responsable Inscripto",
-    taxId: "20-28456789-4",
-  },
-  {
-    id: "2",
-    name: "María González",
-    documentType: "DNI",
-    documentNumber: "30123456",
-    email: "maria.gonzalez@example.com",
-    address: "Av. Santa Fe 567, CABA",
-    taxCondition: "Consumidor Final",
-    taxId: "27-30123456-2",
-  },
-  {
-    id: "3",
-    name: "Carlos Rodríguez",
-    documentType: "DNI",
-    documentNumber: "25789456",
-    email: "carlos.rodriguez@example.com",
-    address: "Calle Lavalle 789, CABA",
-    taxCondition: "Monotributista",
-    taxId: "20-25789456-8",
-  },
-  {
-    id: "4",
-    name: "Laura Fernández",
-    documentType: "DNI",
-    documentNumber: "32456123",
-    email: "laura.fernandez@example.com",
-    address: "Av. Cabildo 1234, CABA",
-    taxCondition: "Exento",
-    taxId: "27-32456123-5",
-  },
-  {
-    id: "5",
-    name: "Empresa ABC S.A.",
-    documentType: "CUIT",
-    documentNumber: "30712345678",
-    email: "contacto@empresaabc.com",
-    address: "Av. Córdoba 1234, CABA",
-    taxCondition: "Responsable Inscripto",
-    taxId: "30-71234567-8",
-  },
-]
+import { getSuppliers, createSupplier, type Supplier } from "@/lib/api"
 
 interface CustomerSelectorProps {
   onSelectCustomer: (customer: Customer) => void
@@ -80,21 +27,34 @@ interface CustomerSelectorProps {
 export function CustomerSelector({ onSelectCustomer, selectedCustomer }: CustomerSelectorProps) {
   const [open, setOpen] = React.useState(false)
   const [searchTerm, setSearchTerm] = React.useState("")
-  const [newCustomer, setNewCustomer] = React.useState<Partial<Customer>>({
-    documentType: "DNI",
-    taxCondition: "Consumidor Final",
-  })
+  const [newCustomer, setNewCustomer] = React.useState<Partial<Supplier>>({})
   const [isAddingNew, setIsAddingNew] = React.useState(false)
+  const [customers, setCustomers] = React.useState<Supplier[]>([])
+  const [loading, setLoading] = React.useState(false)
+  const [error, setError] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    setLoading(true)
+    getSuppliers()
+      .then((data) => {
+        setCustomers(data)
+        setLoading(false)
+      })
+      .catch(() => {
+        setError("Error al cargar clientes")
+        setLoading(false)
+      })
+  }, [open])
 
   // Filtrar clientes por búsqueda
   const filteredCustomers = React.useMemo(() => {
-    return mockCustomers.filter(
+    return customers.filter(
       (customer) =>
         customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        customer.documentNumber.includes(searchTerm) ||
-        customer.taxId.includes(searchTerm),
+        (customer.email && customer.email.includes(searchTerm)) ||
+        (customer.id && customer.id.includes(searchTerm))
     )
-  }, [searchTerm])
+  }, [searchTerm, customers])
 
   // Seleccionar cliente
   const handleSelectCustomer = (customer: Customer) => {
@@ -102,52 +62,27 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
     setOpen(false)
   }
 
-  // Consultar datos fiscales (simulado)
-  const fetchTaxData = () => {
-    if (!newCustomer.taxId) return
-
-    // Simulación de consulta a AFIP
-    setTimeout(() => {
-      if (newCustomer.taxId === "30-71234567-8") {
-        setNewCustomer({
-          ...newCustomer,
-          name: "Empresa ABC S.A.",
-          taxCondition: "Responsable Inscripto",
-          address: "Av. Córdoba 1234, CABA",
-        })
-      } else if (newCustomer.taxId === "20-25789456-8") {
-        setNewCustomer({
-          ...newCustomer,
-          name: "Carlos Rodríguez",
-          taxCondition: "Monotributista",
-          address: "Calle Lavalle 789, CABA",
-        })
-      }
-    }, 1000)
-  }
-
   // Guardar nuevo cliente
-  const saveNewCustomer = () => {
-    if (!newCustomer.name || !newCustomer.taxId) return
-
-    const customer: Customer = {
-      id: `NEW-${Date.now()}`,
-      name: newCustomer.name,
-      documentType: newCustomer.documentType || "DNI",
-      documentNumber: newCustomer.documentNumber || "",
-      email: newCustomer.email || "",
-      address: newCustomer.address || "",
-      taxCondition: newCustomer.taxCondition as Customer["taxCondition"],
-      taxId: newCustomer.taxId,
+  const saveNewCustomer = async () => {
+    if (!newCustomer.name) return
+    setLoading(true)
+    try {
+      const created = await createSupplier({
+        name: newCustomer.name,
+        contact: newCustomer.contact,
+        email: newCustomer.email,
+        phone: newCustomer.phone,
+      })
+      setCustomers((prev) => [...prev, created])
+      onSelectCustomer(created)
+      setIsAddingNew(false)
+      setNewCustomer({})
+      setOpen(false)
+    } catch (e) {
+      setError("Error al crear cliente")
+    } finally {
+      setLoading(false)
     }
-
-    onSelectCustomer(customer)
-    setIsAddingNew(false)
-    setNewCustomer({
-      documentType: "DNI",
-      taxCondition: "Consumidor Final",
-    })
-    setOpen(false)
   }
 
   return (
@@ -187,7 +122,11 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
             </div>
 
             <ScrollArea className="h-[300px] rounded-md border p-2">
-              {filteredCustomers.length > 0 ? (
+              {loading ? (
+                <div className="p-4 text-center text-muted-foreground">Cargando clientes...</div>
+              ) : error ? (
+                <div className="p-4 text-center text-red-500">{error}</div>
+              ) : filteredCustomers.length > 0 ? (
                 <div className="space-y-2">
                   {filteredCustomers.map((customer) => (
                     <div
@@ -198,10 +137,10 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
                       <div>
                         <div className="font-medium">{customer.name}</div>
                         <div className="text-sm text-muted-foreground">
-                          {customer.documentType}: {customer.documentNumber} | CUIT/CUIL: {customer.taxId}
+                          {customer.email ? `Email: ${customer.email}` : ""}
                         </div>
                       </div>
-                      <Badge>{customer.taxCondition}</Badge>
+                      <Badge>{customer.contact}</Badge>
                     </div>
                   ))}
                 </div>
@@ -214,91 +153,41 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
           <div className="space-y-4">
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="taxId">CUIT/CUIL</Label>
-                <div className="flex space-x-2">
-                  <Input
-                    id="taxId"
-                    value={newCustomer.taxId || ""}
-                    onChange={(e) => setNewCustomer({ ...newCustomer, taxId: e.target.value })}
-                    placeholder="XX-XXXXXXXX-X"
-                  />
-                  <Button variant="outline" size="icon" onClick={fetchTaxData}>
-                    <Search className="h-4 w-4" />
-                  </Button>
-                </div>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="taxCondition">Condición frente al IVA</Label>
-                <select
-                  id="taxCondition"
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  value={newCustomer.taxCondition}
-                  onChange={(e) =>
-                    setNewCustomer({
-                      ...newCustomer,
-                      taxCondition: e.target.value as Customer["taxCondition"],
-                    })
-                  }
-                >
-                  <option value="Responsable Inscripto">Responsable Inscripto</option>
-                  <option value="Monotributista">Monotributista</option>
-                  <option value="Exento">Exento</option>
-                  <option value="Consumidor Final">Consumidor Final</option>
-                </select>
-              </div>
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="name">Nombre o Razón Social</Label>
-              <Input
-                id="name"
-                value={newCustomer.name || ""}
-                onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="documentType">Tipo de Documento</Label>
-                <select
-                  id="documentType"
-                  className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  value={newCustomer.documentType}
-                  onChange={(e) => setNewCustomer({ ...newCustomer, documentType: e.target.value })}
-                >
-                  <option value="DNI">DNI</option>
-                  <option value="CUIT">CUIT</option>
-                  <option value="CUIL">CUIL</option>
-                  <option value="Pasaporte">Pasaporte</option>
-                </select>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="documentNumber">Número de Documento</Label>
+                <Label htmlFor="name">Nombre o Razón Social</Label>
                 <Input
-                  id="documentNumber"
-                  value={newCustomer.documentNumber || ""}
-                  onChange={(e) => setNewCustomer({ ...newCustomer, documentNumber: e.target.value })}
+                  id="name"
+                  value={newCustomer.name || ""}
+                  onChange={(e) => setNewCustomer({ ...newCustomer, name: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="contact">Contacto</Label>
+                <Input
+                  id="contact"
+                  value={newCustomer.contact || ""}
+                  onChange={(e) => setNewCustomer({ ...newCustomer, contact: e.target.value })}
                 />
               </div>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                type="email"
-                value={newCustomer.email || ""}
-                onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })}
-              />
-            </div>
-
-            <div className="space-y-2">
-              <Label htmlFor="address">Dirección</Label>
-              <Input
-                id="address"
-                value={newCustomer.address || ""}
-                onChange={(e) => setNewCustomer({ ...newCustomer, address: e.target.value })}
-              />
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="email">Email</Label>
+                <Input
+                  id="email"
+                  type="email"
+                  value={newCustomer.email || ""}
+                  onChange={(e) => setNewCustomer({ ...newCustomer, email: e.target.value })}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="phone">Teléfono</Label>
+                <Input
+                  id="phone"
+                  value={newCustomer.phone || ""}
+                  onChange={(e) => setNewCustomer({ ...newCustomer, phone: e.target.value })}
+                />
+              </div>
             </div>
           </div>
         )}
@@ -309,7 +198,9 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
               <Button variant="outline" onClick={() => setIsAddingNew(false)}>
                 Cancelar
               </Button>
-              <Button onClick={saveNewCustomer}>Guardar Cliente</Button>
+              <Button onClick={saveNewCustomer} disabled={loading}>
+                {loading ? "Guardando..." : "Guardar Cliente"}
+              </Button>
             </>
           ) : (
             <Button variant="outline" onClick={() => setOpen(false)}>

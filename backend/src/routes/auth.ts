@@ -172,18 +172,32 @@ router.post(
         return;
       }
 
-      const user = await prisma.user.findUnique({
+      // 1. Obtener el usuario completo (incluyendo password) para validar
+      const userFull = await prisma.user.findUnique({
         where: { tenantId_email: { tenantId: tenant.id, email } },
       });
+      // 2. Obtener solo los datos públicos para la respuesta
+      const user = await prisma.user.findUnique({
+        where: { tenantId_email: { tenantId: tenant.id, email } },
+        select: {
+          id: true,
+          email: true,
+          name: true,
+          role: true,
+          active: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      });
 
-      if (!user || !user.active) {
+      if (!userFull || !userFull.active) {
         fail(res, 401, "Credenciales inválidas");
         return;
       }
 
       const valid = await bcrypt.compare(
         password + (process.env.PASSWORD_PEPPER ?? ""),
-        user.password
+        userFull.password
       );
       if (!valid) {
         fail(res, 401, "Credenciales inválidas");
@@ -191,13 +205,13 @@ router.post(
       }
 
       const token = signToken({
-        userId: user.id,
-        tenantId: user.tenantId,
-        role: user.role,
-        email: user.email,
+        userId: user!.id,
+        tenantId: tenant.id,
+        role: user!.role,
+        email: user!.email,
       });
 
-      ok(res, { token }, "Login exitoso");
+      ok(res, { token, user }, "Login exitoso");
     } catch (error) {
       console.error("Error en login:", error);
       fail(res, 500, "Error interno del servidor");
