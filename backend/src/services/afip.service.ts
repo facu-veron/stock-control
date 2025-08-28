@@ -61,6 +61,14 @@ export interface AfipInvoiceResponse {
   observaciones?: any[];
   errores?: any[];
 }
+export interface AfipResult {
+  cae: string;           // Sin ? si siempre debe estar presente
+  caeFchVto: string;     // Sin ? si siempre debe estar presente  
+  cbteNumero: number;    // Sin ? si siempre debe estar presente
+  resultado?: string;
+  observaciones?: any[];
+  errores?: any[];
+}
 
 export class AfipService {
   private getAfipInstance(cuit: string, certPem: string, keyPem: string, isProduction = false): Afip {
@@ -350,7 +358,7 @@ export class AfipService {
   }
 
   // Procesa facturación desde una venta de tu sistema
-  async procesarFacturacionFromSale(params: {
+ /*  async procesarFacturacionFromSale(params: {
     tenantId: string;
     sale: any;
     tipoFactura: string;
@@ -358,7 +366,10 @@ export class AfipService {
     customer?: any; // Customer inline opcional
   }): Promise<AfipInvoiceResponse> {
     const { tenantId, sale, tipoFactura, puntoVenta } = params;
-
+    // VALIDACIÓN CRÍTICA: Verificar que la venta tenga ID
+    if (!sale || !sale.id) {
+      throw new Error("La venta debe tener un ID válido antes de procesar la facturación");
+    }
     const tiposFactura = {
       FACTURA_A: 1,
       FACTURA_B: 6,
@@ -457,7 +468,193 @@ export class AfipService {
     });
 
     return result;
+  } */
+// Procesa facturación desde una venta de tu sistema - VERSIÓN MEJORADA
+async procesarFacturacionFromSale(params: {
+  tenantId: string;
+  sale: any;
+  tipoFactura: string;
+  puntoVenta: number;
+  customer?: any;
+}): Promise<AfipInvoiceResponse> {
+  const { tenantId, sale, tipoFactura, puntoVenta } = params;
+
+  // ✅ VALIDACIÓN CRÍTICA: Verificar integridad de datos
+  if (!tenantId) {
+    throw new Error("TenantId es requerido para procesar facturación");
+  }
+
+  if (!sale) {
+    throw new Error("Datos de venta son requeridos para procesar facturación");
+  }
+
+  if (!sale.id) {
+    throw new Error("La venta debe tener un ID válido antes de procesar la facturación AFIP");
+  }
+
+  // Validar que la venta pertenece al tenant
+  if (sale.tenantId !== tenantId) {
+    throw new Error("La venta no pertenece al tenant especificado - Violación de seguridad multitenant");
+  }
+
+  const tiposFactura = {
+    FACTURA_A: 1,
+    FACTURA_B: 6,
+    FACTURA_C: 11,
+  } as const;
+
+  const cbteTipo = (tiposFactura as any)[tipoFactura];
+  if (!cbteTipo) {
+    throw new Error(`Tipo de factura no válido: ${tipoFactura}`);
+  }
+
+  // Validar montos de la venta
+  if (!sale.grandTotal || sale.grandTotal <= 0) {
+    throw new Error("La venta debe tener un monto total válido");
+  }
+
+  console.log("🔍 Procesando facturación AFIP:", {
+    saleId: sale.id,
+    tenantId,
+    tipoFactura,
+    puntoVenta,
+    grandTotal: sale.grandTotal
+  });
+
+  // Doc del receptor - puede venir del customer de la sale O del parámetro customer inline
+  let docTipo = 99; // CF por defecto
+  let docNro = 0;
+  let taxStatus: CustomerTaxStatus | undefined;
+  
+  // Priorizar customer inline en params, luego sale.customer
+  const customerData = params.customer || sale.customer;
+  
+  if (customerData && customerData.documentType && customerData.documentNumber) {
+    switch (customerData.documentType) {
+      case "CUIT":
+        docTipo = 80;
+        docNro = parseInt(String(customerData.documentNumber).replace(/\D/g, ""), 10);
+        break;
+      case "DNI":
+        docTipo = 96;
+        docNro = parseInt(String(customerData.documentNumber).replace(/\D/g, ""), 10);
+        break;
+      default:
+        docTipo = 99;
+        docNro = 0;
+    }
+    taxStatus = customerData.taxStatus as CustomerTaxStatus;
+  }
+  
+  console.log("👤 Datos del receptor:", { docTipo, docNro, taxStatus, hasCustomer: !!customerData });
+
+  if (cbteTipo === 1 && docTipo !== 80) {
+    throw new Error("Para Factura A, el cliente debe tener CUIT válido");
+  }
+
+  const invoiceData: AfipInvoiceData = {
+    ptoVta: puntoVenta,
+    cbteTipo,
+    docTipo,
+    docNro,
+    impNeto: Number(sale.subtotal || 0),
+    impIVA: Number(sale.taxTotal || 0),
+    impTotal: Number(sale.grandTotal || 0),
+
+    // NUEVO: pasamos señales para CondicionIVAReceptorId
+    taxStatus: taxStatus,
+    
+    // opcional: si facturás servicios
+    concepto: sale.concepto as 1 | 2 | 3 | undefined,
+
+    conceptoItems:
+      sale.items?.map((item: any) => ({
+        qty: item.quantity,
+        description: item.productName,
+        unitPrice: Number(item.unitPrice),
+      })) || [],
+  };
+
+  try {
+    const result = await this.createInvoice(tenantId, invoiceData);
+
+    // ✅ VALIDACIÓN: Solo actualizar si tenemos un ID válido de venta
+    if (!sale.id) {
+      throw new Error("No se puede actualizar la venta: ID de venta no válido");
+    }
+
+    const updateData: any = {
+      cbteNro: result.cbteNumero,
+      cbteTipo: cbteTipo,
+      ptoVta: puntoVenta,
+    };
+
+    if (result.cae && result.cae.trim() !== "") {
+      updateData.cae = result.cae;
+      updateData.status = "CONFIRMED"; // Cambiado de COMPLETED a CONFIRMED para consistencia
+      updateData.afipStatus = "APPROVED";
+    } else {
+      updateData.status = "DRAFT";
+      updateData.afipStatus = "REJECTED";
+      updateData.afipError = `Factura rechazada por AFIP. Errores/Obs: ${JSON.stringify(
+        result.errores || result.observaciones
+      )}`;
+    }
+
+    if (result.caeFchVto && result.caeFchVto.trim() !== "") {
+      const year = result.caeFchVto.substring(0, 4);
+      const month = result.caeFchVto.substring(4, 6);
+      const day = result.caeFchVto.substring(6, 8);
+      updateData.caeVto = new Date(`${year}-${month}-${day}T23:59:59.000Z`);
+    }
+
+    // ✅ SEGURIDAD MULTITENANT: Actualizar con filtro de tenant
+    const updatedSale = await prisma.sale.updateMany({
+      where: { 
+        id: sale.id,
+        tenantId: tenantId // ✅ CRÍTICO: Filtro de seguridad multitenant
+      },
+      data: updateData,
+    });
+
+    if (updatedSale.count === 0) {
+      throw new Error("No se pudo actualizar la venta - Posible violación de seguridad multitenant");
+    }
+
+    console.log("✅ Venta actualizada con datos AFIP:", {
+      saleId: sale.id,
+      cae: result.cae,
+      cbteNumero: result.cbteNumero
+    });
+
+    return result;
+
+  } catch (error) {
+    console.error("❌ Error en procesarFacturacionFromSale:", {
+      saleId: sale.id,
+      tenantId,
+      error: error instanceof Error ? error.message : String(error)
+    });
+    
+    // Registrar el error en la venta si es posible
+    try {
+      await prisma.sale.updateMany({
+        where: { 
+          id: sale.id,
+          tenantId: tenantId
+        },
+        data: {
+          afipStatus: "ERROR",
+          afipError: error instanceof Error ? error.message : String(error)
+        }
+      });
+    } catch (updateError) {
+      console.error("❌ No se pudo actualizar el error en la venta:", updateError);
+    }
+
+    throw error;
   }
 }
+  }
 
 export const afipService = new AfipService();

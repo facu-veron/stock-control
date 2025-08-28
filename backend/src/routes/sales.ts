@@ -5,7 +5,6 @@ import { body, validationResult } from "express-validator";
 import { authenticateToken } from "../middleware/auth";
 import type { AuthenticatedRequest } from "../types";
 import bcrypt from "bcryptjs";
-import { afipService } from "../services/afip.service";
 
 
 const router = Router();
@@ -140,7 +139,7 @@ router.post(
       }
 
       // Crear la venta en una transacción
-      const createdSale = await prisma.$transaction(async (tx) => {
+      const sale = await prisma.$transaction(async (tx) => {
         // Generar número de venta
         const lastSale = await tx.sale.findFirst({
           where: { tenantId },
@@ -259,18 +258,17 @@ router.post(
       // Si es factura electrónica, procesarla con AFIP
       if (invoiceType !== "TICKET" && puntoVenta) {
         try {
-          const comprobanteRespuesta = await afipService.procesarFacturacionFromSale({
+          const comprobanteRespuesta = await procesarFacturacionAFIP({
             tenantId,
-            sale: createdSale,
+            sale,
             tipoFactura: invoiceType as any,
-            puntoVenta,
-            customer: req.body.customer // Pasar customer inline si viene en el body
+            puntoVenta
           });
 
           if (comprobanteRespuesta) {
             // Obtener la venta actualizada con datos de AFIP
             const updatedSale = await prisma.sale.findUnique({
-              where: { id: createdSale.id },
+              where: { id: sale.id },
               include: {
                 items: {
                   include: {
@@ -293,9 +291,9 @@ router.post(
               message: "Venta creada y factura electrónica generada",
               sale: updatedSale,
               afip: {
-                cae: comprobanteRespuesta.cae,
-                vencimiento: comprobanteRespuesta.caeFchVto,
-                numero: comprobanteRespuesta.cbteNumero
+                cae: comprobanteRespuesta.CAE,
+                vencimiento: comprobanteRespuesta.CAEFchVto,
+                numero: updatedSale?.cbteNro
               }
             });
           }
@@ -306,7 +304,7 @@ router.post(
           return res.json({
             success: true,
             warning: "Venta creada pero hubo un error con AFIP",
-            sale: createdSale,
+            sale,
             afipError: String(afipError)
           });
         }
@@ -315,7 +313,7 @@ router.post(
       return res.json({
         success: true,
         message: "Venta creada exitosamente",
-        sale: createdSale
+        sale
       });
 
     } catch (error) {
@@ -340,7 +338,7 @@ router.get(
 
     try {
       // Obtener puntos de venta desde AFIP
-      const puntosVentaAfip = await afipService.getPointsOfSale(tenantId);
+      const puntosVentaAfip = await obtenerPuntosVentaAFIP(tenantId);
       
       // Obtener puntos de venta guardados en BD
       const puntosVentaLocal = await prisma.afipPointOfSale.findMany({
@@ -417,7 +415,7 @@ router.post(
       }
 
       // Procesar facturación
-      const comprobanteRespuesta = await afipService.procesarFacturacionFromSale({
+      const comprobanteRespuesta = await procesarFacturacionAFIP({
         tenantId,
         sale,
         tipoFactura: invoiceType,
@@ -438,8 +436,8 @@ router.post(
           message: "Factura electrónica generada exitosamente",
           sale: updatedSale,
           afip: {
-            cae: comprobanteRespuesta.cae,
-            vencimiento: comprobanteRespuesta.caeFchVto
+            cae: comprobanteRespuesta.CAE,
+            vencimiento: comprobanteRespuesta.CAEFchVto
           }
         });
       }
