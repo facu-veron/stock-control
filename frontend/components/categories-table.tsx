@@ -70,18 +70,14 @@ export function CategoriesTable() {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
-            <CardTitle>Categorías</CardTitle>
-            <CardDescription>Gestiona las categorías de productos</CardDescription>
-          </div>
-          <Button asChild>
-            <Link href="/categorias/nueva">
-              <Plus className="mr-2 h-4 w-4" />
-              Nueva Categoría
-            </Link>
-          </Button>
-        </div>
+      <div className="flex items-center justify-end">
+  <Button asChild>
+    <Link href="/categorias/nueva">
+      <Plus className="mr-2 h-4 w-4" />
+      Nueva Categoría
+    </Link>
+  </Button>
+</div>
       </CardHeader>
       <CardContent>
         {error && (

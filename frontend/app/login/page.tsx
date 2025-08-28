@@ -33,7 +33,7 @@ export default function LoginPage() {
               "Esta plataforma ha transformado la manera en que gestionamos nuestro inventario, permitiéndonos tener un
               control total sobre nuestros productos y optimizar nuestras operaciones."
             </p>
-            <footer className="text-sm">María González - Gerente de Operaciones</footer>
+            <footer className="text-sm">Facundo Leonel Veron - Lider de Desarrollo</footer>
           </blockquote>
         </div>
       </div>
