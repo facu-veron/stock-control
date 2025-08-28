@@ -74,9 +74,9 @@ export function ProductSelector({ onAddToCart }: ProductSelectorProps) {
       {
         id: product.id,
         name: product.name,
-        price: product.price,
-        taxRate: product.taxRate,
-        discount: product.discount,
+        price: Number(product.price) || 0,
+        taxRate: Number(product.taxRate) || 21,
+        discount: Number(product.discount) || 0,
         category: product.category?.name || "Sin categoría",
       },
       quantity,
@@ -189,7 +189,7 @@ export function ProductSelector({ onAddToCart }: ProductSelectorProps) {
 
                         {/* Precio y stock */}
                         <div className="space-y-1">
-                          <div className="text-base font-bold">${product.price.toLocaleString("es-AR")}</div>
+                          <div className="text-base font-bold">${(Number(product.price) || 0).toLocaleString("es-AR")}</div>
                           <div className="text-xs text-muted-foreground">Stock: {product.stock} unidades</div>
                         </div>
 
@@ -265,7 +265,7 @@ export function ProductSelector({ onAddToCart }: ProductSelectorProps) {
 
                         {/* Precio */}
                         <div className="text-right mx-4">
-                          <div className="text-base font-bold">${product.price.toLocaleString("es-AR")}</div>
+                          <div className="text-base font-bold">${(Number(product.price) || 0).toLocaleString("es-AR")}</div>
                         </div>
 
                         {/* Controles */}

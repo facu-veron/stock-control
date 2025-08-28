@@ -207,18 +207,18 @@ export function PreInvoice({
                 <TableRow key={item.id}>
                   <TableCell>{item.name}</TableCell>
                   <TableCell className="text-right">{item.quantity}</TableCell>
-                  <TableCell className="text-right">${item.price.toLocaleString("es-AR")}</TableCell>
+                  <TableCell className="text-right">${(Number(item.price) || 0).toLocaleString("es-AR")}</TableCell>
                   {showDetailedTax && (
                     <TableCell className="text-right">
-                      ${(item.price * item.quantity).toLocaleString("es-AR")}
+                      ${((Number(item.price) || 0) * item.quantity).toLocaleString("es-AR")}
                     </TableCell>
                   )}
                   {showDetailedTax && (
                     <TableCell className="text-right">
-                      ${item.tax.toLocaleString("es-AR")} ({item.taxRate}%)
+                      ${(Number(item.tax) || 0).toLocaleString("es-AR")} ({Number(item.taxRate) || 0}%)
                     </TableCell>
                   )}
-                  <TableCell className="text-right">${item.total.toLocaleString("es-AR")}</TableCell>
+                  <TableCell className="text-right">${(Number(item.total) || 0).toLocaleString("es-AR")}</TableCell>
                 </TableRow>
               ))}
             </TableBody>

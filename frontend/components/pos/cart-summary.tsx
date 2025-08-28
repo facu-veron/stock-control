@@ -50,37 +50,7 @@ export function CartSummary({
   const [isDiscountDialogOpen, setIsDiscountDialogOpen] = React.useState(false)
   const [tempDiscount, setTempDiscount] = React.useState(discount)
   const [discountType, setDiscountType] = React.useState<"percentage" | "amount">("percentage")
-console.log(items)
-/* 
-este resultado me da el array 
 
-Array [ {…} ]
-​
-0: Object { id: "cmevfkxv10006twjo84xr5tjw", name: "Pantalon", price: "350000", … }
-​​
-category: "Pantalon"
-​​
-discount: undefined
-​​
-id: "cmevfkxv10006twjo84xr5tjw"
-​​
-name: "Pantalon"
-​​
-price: "350000"
-​​
-quantity: 2
-​​
-tax: 0
-​​
-taxRate: undefined
-​​
-total: NaN
-​​
-<prototype>: Object { … }
-​
-length: 1
-​
-<prototype>: Array [] */
   // Calcular totales con descuento
   const subtotalWithDiscount = totals.subtotal - discount
   const finalTotal = Math.max(0, subtotalWithDiscount + totals.tax)
@@ -162,7 +132,7 @@ length: 1
             <div key={item.id} className="flex items-center space-x-3 p-3 rounded-lg border bg-card">
               <div className="flex-1 min-w-0">
                 <h4 className="text-sm font-medium truncate">{item.name}</h4>
-                <p className="text-xs text-muted-foreground">${item.price.toLocaleString("es-AR")} c/u</p>
+                <p className="text-xs text-muted-foreground">${(Number(item.price) || 0).toLocaleString("es-AR")} c/u</p>
                 {item.category && (
                   <Badge variant="outline" className="text-xs mt-1">
                     {item.category}
@@ -192,8 +162,7 @@ length: 1
               </div>
 
               <div className="text-right">
-                {/* Aca algo falla por eso da error  */}
-                <p className="text-sm font-medium">${item.total.toLocaleString("es-AR")}</p>
+                <p className="text-sm font-medium">${(Number(item.total) || 0).toLocaleString("es-AR")}</p>
               </div>
 
               <Button
@@ -226,7 +195,7 @@ length: 1
                   <DialogTrigger asChild>
                     <Button variant="outline" size="sm" className="h-6 px-2 bg-transparent">
                       <Percent className="h-3 w-3 mr-1" />
-                      {discount > 0 ? `$${discount.toLocaleString("es-AR")}` : "Aplicar"}
+                      {discount > 0 ? `$${(Number(discount) || 0).toLocaleString("es-AR")}` : "Aplicar"}
                     </Button>
                   </DialogTrigger>
                   <DialogContent className="sm:max-w-md">
@@ -281,20 +250,20 @@ length: 1
         <div className="space-y-2">
           <div className="flex justify-between text-sm">
             <span>Subtotal:</span>
-            <span>${totals.subtotal.toLocaleString("es-AR")}</span>
+            <span>${(Number(totals.subtotal) || 0).toLocaleString("es-AR")}</span>
           </div>
 
           {discount > 0 && (
             <div className="flex justify-between text-sm text-green-600">
               <span>Descuento:</span>
-              <span>-${discount.toLocaleString("es-AR")}</span>
+              <span>-${(Number(discount) || 0).toLocaleString("es-AR")}</span>
             </div>
           )}
 
           {documentType === "factura" && totals.tax > 0 && (
             <div className="flex justify-between text-sm">
               <span>IVA:</span>
-              <span>${totals.tax.toLocaleString("es-AR")}</span>
+              <span>${(Number(totals.tax) || 0).toLocaleString("es-AR")}</span>
             </div>
           )}
 
@@ -302,7 +271,7 @@ length: 1
 
           <div className="flex justify-between text-base font-bold">
             <span>Total:</span>
-            <span>${finalTotal.toLocaleString("es-AR")}</span>
+            <span>${(Number(finalTotal) || 0).toLocaleString("es-AR")}</span>
           </div>
         </div>
       </div>
