@@ -9,80 +9,25 @@ import { ArrowLeft, Printer, Mail, FileText } from "lucide-react"
 import { QRCode } from "@/components/pos/qr-code"
 import { useRouter } from "next/navigation"
 import type { InvoiceData } from "@/components/pos/pos-interface"
+import { getSaleById } from "@/lib/api"
 
-// Datos de ejemplo para facturas
-const mockInvoices: InvoiceData[] = [
-  {
-    id: "INV-1001",
-    number: "0001-00000001",
-    type: "A",
-    date: new Date(2023, 6, 15),
-    customer: {
-      id: "5",
-      name: "Empresa ABC S.A.",
-      documentType: "CUIT",
-      documentNumber: "30712345678",
-      email: "contacto@empresaabc.com",
-      address: "Av. Córdoba 1234, CABA",
-      taxCondition: "Responsable Inscripto",
-      taxId: "30-71234567-8",
-    },
-    items: [
-      {
-        id: "1",
-        name: "Camisa Azul Slim Fit",
-        price: 29.99,
-        currency: "USD",
-        quantity: 5,
-        tax: 31.49,
-        taxRate: 21,
-        discount: 0,
-        total: 181.44,
-      },
-    ],
-    subtotal: 149.95,
-    tax: 31.49,
-    total: 181.44,
-    cae: "73628193827192",
-    caeExpirationDate: new Date(2023, 6, 25),
-    currency: "USD",
-  },
-  {
-    id: "INV-1002",
-    number: "0001-00000002",
-    type: "B",
-    date: new Date(2023, 6, 16),
-    customer: {
-      id: "2",
-      name: "María González",
-      documentType: "DNI",
-      documentNumber: "30123456",
-      email: "maria.gonzalez@example.com",
-      address: "Av. Santa Fe 567, CABA",
-      taxCondition: "Consumidor Final",
-      taxId: "27-30123456-2",
-    },
-    items: [
-      {
-        id: "2",
-        name: "Perfume Elegance",
-        price: 59.99,
-        currency: "USD",
-        quantity: 1,
-        tax: 12.6,
-        taxRate: 21,
-        discount: 0,
-        total: 72.59,
-      },
-    ],
-    subtotal: 59.99,
-    tax: 12.6,
-    total: 72.59,
-    cae: "73628193827193",
-    caeExpirationDate: new Date(2023, 6, 26),
-    currency: "USD",
-  },
-]
+// Datos de respaldo en caso de error
+const fallbackInvoice = {
+  id: "fallback",
+  number: "0000-00000000",
+  type: "TICKET",
+  date: new Date(),
+  customer: null,
+  employee: null,
+  items: [],
+  subtotal: 0,
+  tax: 0,
+  total: 0,
+  cae: "Sin CAE",
+  caeExpirationDate: new Date(),
+  currency: "ARS",
+  status: "error"
+}
 
 interface InvoiceDetailProps {
   invoiceId: string
@@ -90,12 +35,57 @@ interface InvoiceDetailProps {
 
 export function InvoiceDetail({ invoiceId }: InvoiceDetailProps) {
   const router = useRouter()
-  const [invoice, setInvoice] = React.useState<InvoiceData | null>(null)
+  const [invoice, setInvoice] = React.useState<any | null>(null)
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState<string | null>(null)
 
-  // Simular carga de factura
+  // Cargar factura real desde la API
   React.useEffect(() => {
-    const foundInvoice = mockInvoices.find((inv) => inv.id === invoiceId)
-    setInvoice(foundInvoice || null)
+    const loadInvoice = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const sale = await getSaleById(invoiceId)
+        
+        // Transformar los datos de venta al formato esperado por el componente
+        const transformedInvoice = {
+          id: sale.id,
+          number: sale.saleNumber || sale.cbteNro ? `0001-${String(sale.cbteNro).padStart(8, '0')}` : sale.saleNumber,
+          type: sale.cbteTipo === 1 ? "A" : sale.cbteTipo === 6 ? "B" : sale.cbteTipo === 11 ? "C" : "TICKET",
+          date: new Date(sale.createdAt),
+          customer: sale.customer,
+          employee: sale.employee,
+          items: sale.items.map((item: any): any => ({
+            id: item.id,
+            name: item.productName || item.product?.name,
+            price: Number(item.unitPrice) || 0,
+            quantity: Number(item.quantity) || 0,
+            tax: Number(item.lineTotal) * (Number(item.ivaRate) / 100) || 0,
+            taxRate: Number(item.ivaRate) || 21,
+            discount: Number(item.discount) || 0,
+            total: Number(item.lineTotal) || 0,
+          })),
+          subtotal: Number(sale.subtotal) || 0,
+          tax: Number(sale.taxTotal) || 0,
+          total: Number(sale.grandTotal) || 0,
+          cae: sale.cae || "Sin CAE",
+          caeExpirationDate: sale.caeVto ? new Date(sale.caeVto) : new Date(),
+          currency: "ARS",
+          status: sale.status
+        }
+        
+        setInvoice(transformedInvoice)
+      } catch (err) {
+        console.error("Error cargando factura:", err)
+        setError("Error al cargar la factura")
+        // Usar datos de respaldo si hay error
+        setInvoice(fallbackInvoice)
+      } finally {
+        setLoading(false)
+      }
+    }
+
+    loadInvoice()
   }, [invoiceId])
 
   // Generar datos para el QR (simulado)
@@ -123,10 +113,18 @@ export function InvoiceDetail({ invoiceId }: InvoiceDetailProps) {
     return JSON.stringify(qrInfo)
   }, [invoice])
 
-  if (!invoice) {
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
-        <p>Factura no encontrada</p>
+        <p>Cargando factura...</p>
+      </div>
+    )
+  }
+
+  if (error || !invoice) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <p>{error || "Factura no encontrada"}</p>
       </div>
     )
   }
@@ -239,25 +237,25 @@ export function InvoiceDetail({ invoiceId }: InvoiceDetailProps) {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {invoice.items.map((item) => (
+              {invoice.items.map((item: any) => (
                 <TableRow key={item.id}>
                   <TableCell>{item.name}</TableCell>
                   <TableCell className="text-right">{item.quantity}</TableCell>
                   <TableCell className="text-right">
-                    {invoice.currency === "USD" ? "USD" : "$"} {item.price.toFixed(2)}
+                    $ {(item.price || 0).toFixed(2)}
                   </TableCell>
                   {showDetailedTax && (
                     <TableCell className="text-right">
-                      {invoice.currency === "USD" ? "USD" : "$"} {(item.price * item.quantity).toFixed(2)}
+                      $ {((item.price || 0) * (item.quantity || 0)).toFixed(2)}
                     </TableCell>
                   )}
                   {showDetailedTax && (
                     <TableCell className="text-right">
-                      {invoice.currency === "USD" ? "USD" : "$"} {item.tax.toFixed(2)} ({item.taxRate}%)
+                      $ {(item.tax || 0).toFixed(2)} ({item.taxRate || 21}%)
                     </TableCell>
                   )}
                   <TableCell className="text-right">
-                    {invoice.currency === "USD" ? "USD" : "$"} {item.total.toFixed(2)}
+                    $ {(item.total || 0).toFixed(2)}
                   </TableCell>
                 </TableRow>
               ))}
@@ -268,7 +266,7 @@ export function InvoiceDetail({ invoiceId }: InvoiceDetailProps) {
                   <TableRow>
                     <TableCell colSpan={3}>Subtotal</TableCell>
                     <TableCell className="text-right">
-                      {invoice.currency === "USD" ? "USD" : "$"} {invoice.subtotal.toFixed(2)}
+                      $ {(invoice.subtotal || 0).toFixed(2)}
                     </TableCell>
                     <TableCell colSpan={2}></TableCell>
                   </TableRow>
@@ -276,7 +274,7 @@ export function InvoiceDetail({ invoiceId }: InvoiceDetailProps) {
                     <TableCell colSpan={3}>IVA</TableCell>
                     <TableCell colSpan={1}></TableCell>
                     <TableCell className="text-right">
-                      {invoice.currency === "USD" ? "USD" : "$"} {invoice.tax.toFixed(2)}
+                      $ {(invoice.tax || 0).toFixed(2)}
                     </TableCell>
                     <TableCell colSpan={1}></TableCell>
                   </TableRow>
@@ -285,14 +283,14 @@ export function InvoiceDetail({ invoiceId }: InvoiceDetailProps) {
                 <TableRow>
                   <TableCell colSpan={3}>Subtotal</TableCell>
                   <TableCell className="text-right">
-                    {invoice.currency === "USD" ? "USD" : "$"} {invoice.subtotal.toFixed(2)}
+                    $ {(invoice.subtotal || 0).toFixed(2)}
                   </TableCell>
                 </TableRow>
               )}
               <TableRow>
                 <TableCell colSpan={showDetailedTax ? 5 : 3}>Total</TableCell>
                 <TableCell className="text-right">
-                  {invoice.currency === "USD" ? "USD" : "$"} {invoice.total.toFixed(2)}
+                  $ {(invoice.total || 0).toFixed(2)}
                 </TableCell>
               </TableRow>
             </TableFooter>

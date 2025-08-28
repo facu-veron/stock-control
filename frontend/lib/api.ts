@@ -488,6 +488,23 @@ export const verifyPin = async (pin: string): Promise<any> => {
   return response;
 };
 
+// Sales API
+export const getSales = async (): Promise<any[]> => {
+  const response = (await fetchApi<any[]>("/sales")) as ApiResponse<any[]>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to fetch sales")
+};
+
+export const getSaleById = async (id: string): Promise<any> => {
+  const response = (await fetchApi<any>(`/sales/${id}`)) as ApiResponse<any>
+  if (response.success) {
+    return response.data
+  }
+  throw new Error(response.error || "Failed to fetch sale")
+};
+
 export interface Customer {
   id: string;
   name: string;

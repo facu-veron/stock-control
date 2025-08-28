@@ -57,7 +57,7 @@ export function InvoiceSuccess({ invoiceData, onNewSale, onViewInvoice, canViewI
                 <h4 className="font-medium mb-2">Cliente</h4>
                 <div className="text-sm text-muted-foreground space-y-1">
                   <p>{invoiceData.customer.name}</p>
-                  <p>{invoiceData.customer.taxCondition}</p>
+                  <p>{invoiceData.customer.documentType}</p>
                   <p>{invoiceData.customer.taxId}</p>
                 </div>
               </div>
@@ -68,7 +68,7 @@ export function InvoiceSuccess({ invoiceData, onNewSale, onViewInvoice, canViewI
               <h4 className="font-medium mb-2">Vendedor</h4>
               <div className="text-sm text-muted-foreground">
                 <p>{invoiceData.employee.name}</p>
-                <p>{invoiceData.employee.role === "admin" ? "Administrador" : "Empleado"}</p>
+                <p>{invoiceData.employee.role === "ADMIN" ? "Administrador" : "Empleado"}</p>
               </div>
             </div>
 
@@ -98,10 +98,10 @@ export function InvoiceSuccess({ invoiceData, onNewSale, onViewInvoice, canViewI
                   <div>
                     <p className="font-medium">{item.name}</p>
                     <p className="text-muted-foreground">
-                      {item.quantity} x ${item.price.toFixed(2)}
+                      {item.quantity} x ${(Number(item.price) || 0).toFixed(2)}
                     </p>
                   </div>
-                  <p className="font-medium">${item.total.toFixed(2)}</p>
+                  <p className="font-medium">${(Number(item.total) || 0).toFixed(2)}</p>
                 </div>
               ))}
             </div>
@@ -112,18 +112,18 @@ export function InvoiceSuccess({ invoiceData, onNewSale, onViewInvoice, canViewI
             <div className="space-y-2">
               <div className="flex justify-between text-sm">
                 <span>Subtotal:</span>
-                <span>${invoiceData.subtotal.toFixed(2)}</span>
+                <span>${(Number(invoiceData.subtotal) || 0).toFixed(2)}</span>
               </div>
-              {invoiceData.tax > 0 && (
+              {(Number(invoiceData.tax) || 0) > 0 && (
                 <div className="flex justify-between text-sm">
                   <span>IVA (21%):</span>
-                  <span>${invoiceData.tax.toFixed(2)}</span>
+                  <span>${(Number(invoiceData.tax) || 0).toFixed(2)}</span>
                 </div>
               )}
               <Separator />
               <div className="flex justify-between font-bold">
                 <span>Total:</span>
-                <span>${invoiceData.total.toFixed(2)}</span>
+                <span>${(Number(invoiceData.total) || 0).toFixed(2)}</span>
               </div>
             </div>
           </CardContent>
@@ -147,7 +147,7 @@ export function InvoiceSuccess({ invoiceData, onNewSale, onViewInvoice, canViewI
                   ptoVta: 1,
                   tipoCmp: invoiceData.type === "A" ? 1 : 6,
                   nroCmp: Number.parseInt(invoiceData.number.split("-")[1]),
-                  importe: invoiceData.total,
+                  importe: Number(invoiceData.total) || 0,
                   moneda: "PES",
                   ctz: 1,
                   tipoDocRec: invoiceData.customer?.documentType === "CUIT" ? 80 : 96,

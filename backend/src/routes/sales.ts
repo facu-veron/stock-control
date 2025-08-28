@@ -11,6 +11,79 @@ import { afipService } from "../services/afip.service";
 const router = Router();
 
 /**
+ * GET /api/sales
+ * Obtiene todas las ventas del tenant
+ */
+router.get("/", authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const sales = await prisma.sale.findMany({
+      where: { tenantId },
+      include: {
+        items: {
+          include: {
+            product: true
+          }
+        },
+        customer: true,
+        employee: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      },
+      orderBy: { createdAt: "desc" }
+    });
+
+    res.json({ success: true, data: sales });
+  } catch (error) {
+    console.error("Error al obtener ventas:", error);
+    res.status(500).json({ success: false, error: "Error interno al obtener ventas" });
+  }
+});
+
+/**
+ * GET /api/sales/:id
+ * Obtiene una venta específica por ID
+ */
+router.get("/:id", authenticateToken, async (req: AuthenticatedRequest, res) => {
+  try {
+    const tenantId = req.user!.tenantId;
+    const { id } = req.params;
+
+    const sale = await prisma.sale.findFirst({
+      where: { id, tenantId },
+      include: {
+        items: {
+          include: {
+            product: true
+          }
+        },
+        customer: true,
+        employee: {
+          select: {
+            id: true,
+            name: true,
+            email: true
+          }
+        }
+      }
+    });
+
+    if (!sale) {
+      return res.status(404).json({ success: false, error: "Venta no encontrada" });
+    }
+
+    return res.json({ success: true, data: sale });
+  } catch (error) {
+    console.error("Error al obtener venta:", error);
+    return res.status(500).json({ success: false, error: "Error interno al obtener venta" });
+  }
+});
+
+/**
  * POST /api/sales/validate-pin
  * Valida el PIN de un empleado para autorizar la venta
  */

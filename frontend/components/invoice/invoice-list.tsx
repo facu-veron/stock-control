@@ -40,96 +40,38 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
+import { getSales } from "@/lib/api"
 
-// Datos de ejemplo para facturas
-const mockInvoices: InvoiceData[] = [
-  {
-    id: "INV-1001",
-    number: "0001-00000001",
-    type: "A",
-    date: new Date(2023, 6, 15),
-    customer: {
-      id: "5",
-      name: "Empresa ABC S.A.",
-      documentType: "CUIT",
-      documentNumber: "30712345678",
-      email: "contacto@empresaabc.com",
-      address: "Av. Córdoba 1234, CABA",
-      taxCondition: "Responsable Inscripto",
-      taxId: "30-71234567-8",
-    },
-    employee: {
-      id: "1",
-      name: "Admin",
-      pin: "1234",
-      role: "admin",
-      isActive: true,
-    },
-    items: [
-      {
-        id: "1",
-        name: "Camisa Azul Slim Fit",
-        price: 29.99,
-        quantity: 5,
-        tax: 31.49,
-        taxRate: 21,
-        discount: 0,
-        total: 181.44,
-        category: "Ropa",
-      },
-    ],
-    subtotal: 149.95,
-    tax: 31.49,
-    total: 181.44,
-    cae: "73628193827192",
-    caeExpirationDate: new Date(2023, 6, 25),
-    status: "completed",
-  },
-  {
-    id: "INV-1002",
-    number: "0001-00000002",
-    type: "B",
-    date: new Date(2023, 6, 16),
-    customer: {
-      id: "2",
-      name: "María González",
-      documentType: "DNI",
-      documentNumber: "30123456",
-      email: "maria.gonzalez@example.com",
-      address: "Av. Santa Fe 567, CABA",
-      taxCondition: "Consumidor Final",
-      taxId: "27-30123456-2",
-    },
-    employee: {
-      id: "2",
-      name: "Juan Pérez",
-      pin: "5678",
-      role: "employee",
-      isActive: true,
-    },
-    items: [
-      {
-        id: "2",
-        name: "Perfume Elegance",
-        price: 59.99,
-        quantity: 1,
-        tax: 12.6,
-        taxRate: 21,
-        discount: 0,
-        total: 72.59,
-        category: "Perfumes",
-      },
-    ],
-    subtotal: 59.99,
-    tax: 12.6,
-    total: 72.59,
-    cae: "73628193827193",
-    caeExpirationDate: new Date(2023, 6, 26),
-    status: "completed",
-  },
-]
+// Función para transformar datos de venta a formato de factura
+const transformSaleToInvoice = (sale: any): any => {
+  return {
+    id: sale.id,
+    number: sale.saleNumber || (sale.cbteNro ? `0001-${String(sale.cbteNro).padStart(8, '0')}` : sale.saleNumber),
+    type: sale.cbteTipo === 1 ? "A" : sale.cbteTipo === 6 ? "B" : sale.cbteTipo === 11 ? "C" : "TICKET",
+    date: new Date(sale.createdAt),
+    customer: sale.customer,
+    employee: sale.employee,
+    items: sale.items?.map((item: any) => ({
+      id: item.id,
+      name: item.productName || item.product?.name,
+      price: Number(item.unitPrice) || 0,
+      quantity: Number(item.quantity) || 0,
+      tax: Number(item.lineTotal) * (Number(item.ivaRate) / 100) || 0,
+      taxRate: Number(item.ivaRate) || 21,
+      discount: Number(item.discount) || 0,
+      total: Number(item.lineTotal) || 0,
+      category: item.product?.category?.name || "Sin categoría",
+    })) || [],
+    subtotal: Number(sale.subtotal) || 0,
+    tax: Number(sale.taxTotal) || 0,
+    total: Number(sale.grandTotal) || 0,
+    cae: sale.cae || "Sin CAE",
+    caeExpirationDate: sale.caeVto ? new Date(sale.caeVto) : new Date(),
+    status: sale.status === "CONFIRMED" ? "completed" : sale.status === "DRAFT" ? "pending" : "error"
+  }
+}
 
-export const columns: ColumnDef<InvoiceData>[] = [
+export const columns: ColumnDef<any>[] = [
   {
     accessorKey: "number",
     header: "Número",
@@ -182,7 +124,8 @@ export const columns: ColumnDef<InvoiceData>[] = [
       )
     },
     cell: ({ row }) => {
-      const amount = Number.parseFloat(row.getValue("total"))
+      const totalValue = row.getValue("total")
+      const amount = Number(totalValue) || 0
       const formatted = new Intl.NumberFormat("es-AR", {
         style: "currency",
         currency: "ARS",
@@ -302,26 +245,29 @@ export function InvoiceList() {
   const [rowSelection, setRowSelection] = React.useState({})
   const [searchTerm, setSearchTerm] = React.useState("")
   const [dateRange, setDateRange] = React.useState<{ from?: Date; to?: Date }>({})
+  const [invoices, setInvoices] = React.useState<any[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [error, setError] = React.useState<string | null>(null)
 
-  // Cargar facturas del localStorage si existen (simulado)
-  const [invoices, setInvoices] = React.useState<InvoiceData[]>(mockInvoices)
-
+  // Cargar facturas reales desde la API
   React.useEffect(() => {
-    try {
-      const savedInvoices = localStorage.getItem("invoiceHistory")
-      if (savedInvoices) {
-        const parsedInvoices = JSON.parse(savedInvoices)
-        // Convertir strings de fecha a objetos Date
-        const processedInvoices = parsedInvoices.map((inv: any) => ({
-          ...inv,
-          date: new Date(inv.date),
-          caeExpirationDate: inv.caeExpirationDate ? new Date(inv.caeExpirationDate) : undefined,
-        }))
-        setInvoices([...mockInvoices, ...processedInvoices])
+    const loadInvoices = async () => {
+      try {
+        setLoading(true)
+        setError(null)
+        const sales = await getSales()
+        const transformedInvoices = sales.map(transformSaleToInvoice)
+        setInvoices(transformedInvoices)
+      } catch (err) {
+        console.error("Error cargando facturas:", err)
+        setError("Error al cargar facturas")
+        setInvoices([])
+      } finally {
+        setLoading(false)
       }
-    } catch (error) {
-      console.error("Error al cargar facturas:", error)
     }
+
+    loadInvoices()
   }, [])
 
   // Filtrar facturas por fecha
@@ -363,6 +309,30 @@ export function InvoiceList() {
       table.getColumn("customer")?.setFilterValue("")
     }
   }, [searchTerm, table])
+
+  if (loading) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex items-center justify-center h-64">
+            <p>Cargando facturas...</p>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
+
+  if (error) {
+    return (
+      <Card>
+        <CardContent className="p-6">
+          <div className="flex items-center justify-center h-64">
+            <p className="text-red-500">{error}</p>
+          </div>
+        </CardContent>
+      </Card>
+    )
+  }
 
   return (
     <Card>

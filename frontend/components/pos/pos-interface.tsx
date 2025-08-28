@@ -88,11 +88,11 @@ export function PosInterface() {
       setInvoiceType("TICKET")
       setCustomer(null) // Los tickets no requieren cliente
     } else if (customer) {
-      if (customer.taxCondition === "Responsable Inscripto") {
+      if (customer.taxStatus === "Responsable Inscripto") {
         setInvoiceType("A")
-      } else if (customer.taxCondition === "Monotributista" || customer.taxCondition === "Exento") {
+      } else if (customer.taxStatus === "Monotributista" || customer.taxStatus === "Exento") {
         setInvoiceType("B")
-      } else if (customer.taxCondition === "Consumidor Final") {
+      } else if (customer.taxStatus === "Consumidor Final") {
         setInvoiceType("B")
       }
     } else {
@@ -492,7 +492,7 @@ export function PosInterface() {
                   <div className="bg-muted/50 p-3 rounded-lg">
                     <div className="text-sm font-medium">{customer.name}</div>
                     <div className="text-xs text-muted-foreground">
-                      {customer.taxCondition} - {customer.taxId}
+                      {customer.taxStatus} - {customer.taxId}
                     </div>
                   </div>
                 )}
