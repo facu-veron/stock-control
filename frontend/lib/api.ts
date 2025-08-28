@@ -516,6 +516,7 @@ export interface Customer {
   address?: string;
   city?: string;
   state?: string;
+  taxCondition?: string;
   postalCode?: string;
   country?: string;
   taxId?: string;

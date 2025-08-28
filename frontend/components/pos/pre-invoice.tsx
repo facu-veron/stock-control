@@ -1,6 +1,8 @@
 "use client"
 import { Button } from "@/components/ui/button"
-import type { CartItem, Customer, Employee, InvoiceType } from "@/components/pos/pos-interface"
+import type { CartItem, InvoiceType } from "@/components/pos/pos-interface"
+import type { User as Employee, Customer } from "@/lib/api"
+
 import { ArrowLeft, FileText, AlertCircle, Receipt, Banknote, CreditCard, DollarSign } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -114,8 +116,8 @@ export function PreInvoice({
               <div className="grid grid-cols-3 gap-1">
                 <div className="text-sm font-medium">Rol:</div>
                 <div className="col-span-2">
-                  <Badge variant={employee.role === "admin" ? "default" : "outline"}>
-                    {employee.role === "admin" ? "Administrador" : "Empleado"}
+                  <Badge variant={employee.role === "ADMIN" ? "default" : "outline"}>
+                    {employee.role === "ADMIN" ? "Administrador" : "Empleado"}
                   </Badge>
                 </div>
               </div>

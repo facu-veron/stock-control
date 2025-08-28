@@ -50,7 +50,7 @@ export function CartSummary({
   const [isDiscountDialogOpen, setIsDiscountDialogOpen] = React.useState(false)
   const [tempDiscount, setTempDiscount] = React.useState(discount)
   const [discountType, setDiscountType] = React.useState<"percentage" | "amount">("percentage")
-
+console.log(items)
   // Calcular totales con descuento
   const subtotalWithDiscount = totals.subtotal - discount
   const finalTotal = Math.max(0, subtotalWithDiscount + totals.tax)
@@ -162,6 +162,7 @@ export function CartSummary({
               </div>
 
               <div className="text-right">
+                {/* Aca algo falla por eso da error  */}
                 <p className="text-sm font-medium">${item.total.toLocaleString("es-AR")}</p>
               </div>
 
