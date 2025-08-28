@@ -690,6 +690,7 @@ model User {
   avatarUrl   String?
   lastLoginAt DateTime?
   timezone    String?   @default("America/Argentina/Buenos_Aires")
+  phone       String? // Teléfono del empleado
 
   active    Boolean  @default(true)
   createdAt DateTime @default(now())
@@ -872,6 +873,7 @@ model Customer {
   state          String?
   postalCode     String?
   country        String?      @default("AR")
+  taxId          String? // CUIT/DNI adicional
 
   // Información comercial
   creditLimit  Decimal? @db.Decimal(12, 2)

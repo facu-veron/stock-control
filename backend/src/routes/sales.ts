@@ -140,7 +140,7 @@ router.post(
       }
 
       // Crear la venta en una transacción
-      const sale = await prisma.$transaction(async (tx) => {
+      const createdSale = await prisma.$transaction(async (tx) => {
         // Generar número de venta
         const lastSale = await tx.sale.findFirst({
           where: { tenantId },
@@ -261,7 +261,7 @@ router.post(
         try {
           const comprobanteRespuesta = await afipService.procesarFacturacionFromSale({
             tenantId,
-            sale,
+            sale: createdSale,
             tipoFactura: invoiceType as any,
             puntoVenta,
             customer: req.body.customer // Pasar customer inline si viene en el body
@@ -270,7 +270,7 @@ router.post(
           if (comprobanteRespuesta) {
             // Obtener la venta actualizada con datos de AFIP
             const updatedSale = await prisma.sale.findUnique({
-              where: { id: sale.id },
+              where: { id: createdSale.id },
               include: {
                 items: {
                   include: {
@@ -306,7 +306,7 @@ router.post(
           return res.json({
             success: true,
             warning: "Venta creada pero hubo un error con AFIP",
-            sale,
+            sale: createdSale,
             afipError: String(afipError)
           });
         }
@@ -315,7 +315,7 @@ router.post(
       return res.json({
         success: true,
         message: "Venta creada exitosamente",
-        sale
+        sale: createdSale
       });
 
     } catch (error) {

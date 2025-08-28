@@ -1,4 +1,4 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:5000/api"
+const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api"
 
 // Tipos definidos en el frontend
 export interface User {
@@ -9,6 +9,7 @@ export interface User {
   active: boolean
   createdAt: string
   updatedAt: string
+  pin?: string | null // <-- Agregado para mostrar el pin en el frontend
 }
 
 export interface Category {
@@ -26,6 +27,8 @@ export interface Supplier {
   contact?: string
   email?: string
   phone?: string
+  address?: string
+  taxId?: string
   createdAt: string
   updatedAt: string
 }
@@ -126,6 +129,8 @@ export interface CreateSupplierRequest {
   contact?: string
   email?: string
   phone?: string
+  address?: string
+  taxId?: string
 }
 
 export interface UpdateSupplierRequest extends Partial<CreateSupplierRequest> {}
@@ -136,6 +141,7 @@ export interface CreateEmployeeRequest {
   password?: string
   role?: "ADMIN" | "EMPLOYEE"
   active?: boolean
+  pin?: string // <-- Agregado
 }
 
 export interface UpdateEmployeeRequest {
@@ -144,6 +150,7 @@ export interface UpdateEmployeeRequest {
   password?: string
   role?: "ADMIN" | "EMPLOYEE"
   active?: boolean
+  pin?: string // <-- Agregado
 }
 
 export interface CreateSaleRequest {
@@ -472,3 +479,93 @@ export const createSale = async (sale: CreateSaleRequest) => {
   }
   throw new Error(response.error || "Failed to create sale");
 }
+
+export const verifyPin = async (pin: string): Promise<any> => {
+  const response = await fetchApi<any>("/sales/validate-pin", {
+    method: "POST",
+    body: JSON.stringify({ pin }),
+  }) as ApiResponse<any>;
+  return response;
+};
+
+export interface Customer {
+  id: string;
+  name: string;
+  documentType: string;
+  documentNumber: string;
+  taxStatus: string;
+  email?: string;
+  phoneNumber?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+  taxId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCustomerRequest {
+  name: string;
+  documentType: string;
+  documentNumber: string;
+  taxStatus: string;
+  email?: string;
+  phoneNumber?: string;
+  address?: string;
+  city?: string;
+  state?: string;
+  postalCode?: string;
+  country?: string;
+  taxId?: string;
+}
+
+export interface UpdateCustomerRequest extends Partial<CreateCustomerRequest> {}
+
+export const getCustomers = async (): Promise<Customer[]> => {
+  const response = await fetchApi<Customer[]>("/customers") as ApiResponse<Customer[]>;
+  if (response.success) {
+    return response.data;
+  }
+  throw new Error(response.error || "Failed to fetch customers");
+};
+
+export const getCustomerById = async (id: string): Promise<Customer> => {
+  const response = await fetchApi<Customer>(`/customers/${id}`) as ApiResponse<Customer>;
+  if (response.success) {
+    return response.data;
+  }
+  throw new Error(response.error || "Failed to fetch customer");
+};
+
+export const createCustomer = async (customer: CreateCustomerRequest): Promise<Customer> => {
+  const response = await fetchApi<Customer>("/customers", {
+    method: "POST",
+    body: JSON.stringify(customer),
+  }) as ApiResponse<Customer>;
+  if (response.success) {
+    return response.data;
+  }
+  throw new Error(response.error || "Failed to create customer");
+};
+
+export const updateCustomer = async (id: string, customer: UpdateCustomerRequest): Promise<Customer> => {
+  const response = await fetchApi<Customer>(`/customers/${id}`, {
+    method: "PUT",
+    body: JSON.stringify(customer),
+  }) as ApiResponse<Customer>;
+  if (response.success) {
+    return response.data;
+  }
+  throw new Error(response.error || "Failed to update customer");
+};
+
+export const deleteCustomer = async (id: string): Promise<void> => {
+  const response = await fetchApi<null>(`/customers/${id}`, {
+    method: "DELETE",
+  }) as ApiResponse<null>;
+  if (!response.success) {
+    throw new Error(response.error || "Failed to delete customer");
+  }
+};

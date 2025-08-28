@@ -13,33 +13,64 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import type { Customer } from "@/lib/api"
+import type { Customer } from "@/components/pos/pos-interface"
 import { UserRound, Search, Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
-import { getCustomers, createCustomer } from "@/lib/api"
-import { toast } from "@/components/ui/use-toast"
 
-// Mapeo de condiciones fiscales para compatibilidad con API
-const mapTaxConditionToAPI = (condition: string) => {
-  const mapping: Record<string, string> = {
-    "Responsable Inscripto": "RESPONSABLE_INSCRIPTO",
-    "Monotributista": "MONOTRIBUTISTA", 
-    "Exento": "EXENTO",
-    "Consumidor Final": "CONSUMIDOR_FINAL"
-  }
-  return mapping[condition] || "CONSUMIDOR_FINAL"
-}
-
-const mapTaxConditionFromAPI = (status: string) => {
-  const mapping: Record<string, string> = {
-    "RESPONSABLE_INSCRIPTO": "Responsable Inscripto",
-    "MONOTRIBUTISTA": "Monotributista", 
-    "EXENTO": "Exento",
-    "CONSUMIDOR_FINAL": "Consumidor Final"
-  }
-  return mapping[status] || "Consumidor Final"
-}
+// Clientes de ejemplo
+const mockCustomers: Customer[] = [
+  {
+    id: "1",
+    name: "Juan Pérez",
+    documentType: "DNI",
+    documentNumber: "28456789",
+    email: "juan.perez@example.com",
+    address: "Av. Corrientes 1234, CABA",
+    taxCondition: "Responsable Inscripto",
+    taxId: "20-28456789-4",
+  },
+  {
+    id: "2",
+    name: "María González",
+    documentType: "DNI",
+    documentNumber: "30123456",
+    email: "maria.gonzalez@example.com",
+    address: "Av. Santa Fe 567, CABA",
+    taxCondition: "Consumidor Final",
+    taxId: "27-30123456-2",
+  },
+  {
+    id: "3",
+    name: "Carlos Rodríguez",
+    documentType: "DNI",
+    documentNumber: "25789456",
+    email: "carlos.rodriguez@example.com",
+    address: "Calle Lavalle 789, CABA",
+    taxCondition: "Monotributista",
+    taxId: "20-25789456-8",
+  },
+  {
+    id: "4",
+    name: "Laura Fernández",
+    documentType: "DNI",
+    documentNumber: "32456123",
+    email: "laura.fernandez@example.com",
+    address: "Av. Cabildo 1234, CABA",
+    taxCondition: "Exento",
+    taxId: "27-32456123-5",
+  },
+  {
+    id: "5",
+    name: "Empresa ABC S.A.",
+    documentType: "CUIT",
+    documentNumber: "30712345678",
+    email: "contacto@empresaabc.com",
+    address: "Av. Córdoba 1234, CABA",
+    taxCondition: "Responsable Inscripto",
+    taxId: "30-71234567-8",
+  },
+]
 
 interface CustomerSelectorProps {
   onSelectCustomer: (customer: Customer) => void
@@ -51,39 +82,19 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
   const [searchTerm, setSearchTerm] = React.useState("")
   const [newCustomer, setNewCustomer] = React.useState<Partial<Customer>>({
     documentType: "DNI",
-    taxStatus: "Consumidor Final",
+    taxCondition: "Consumidor Final",
   })
   const [isAddingNew, setIsAddingNew] = React.useState(false)
-  const [customers, setCustomers] = React.useState<Customer[]>([])
-  const [loading, setLoading] = React.useState(false)
-  const [error, setError] = React.useState<string | null>(null)
-
-  // Cargar clientes cuando se abre el diálogo
-  React.useEffect(() => {
-    if (open && !isAddingNew) {
-      setLoading(true)
-      setError(null)
-      getCustomers()
-        .then((data) => {
-          setCustomers(data)
-          setLoading(false)
-        })
-        .catch(() => {
-          setError("Error al cargar clientes")
-          setLoading(false)
-        })
-    }
-  }, [open, isAddingNew])
 
   // Filtrar clientes por búsqueda
   const filteredCustomers = React.useMemo(() => {
-    return customers.filter(
+    return mockCustomers.filter(
       (customer) =>
         customer.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
-        (customer.documentNumber && customer.documentNumber.includes(searchTerm)) ||
-        (customer.taxId && customer.taxId.includes(searchTerm))
+        customer.documentNumber.includes(searchTerm) ||
+        customer.taxId.includes(searchTerm),
     )
-  }, [searchTerm, customers])
+  }, [searchTerm])
 
   // Seleccionar cliente
   const handleSelectCustomer = (customer: Customer) => {
@@ -91,24 +102,24 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
     setOpen(false)
   }
 
-  // Consultar datos fiscales (simulado - mantenemos la funcionalidad original)
+  // Consultar datos fiscales (simulado)
   const fetchTaxData = () => {
     if (!newCustomer.taxId) return
 
-    // Simulación de consulta a AFIP - mantenemos la lógica original
+    // Simulación de consulta a AFIP
     setTimeout(() => {
       if (newCustomer.taxId === "30-71234567-8") {
         setNewCustomer({
           ...newCustomer,
           name: "Empresa ABC S.A.",
-          taxStatus: "RESPONSABLE_INSCRIPTO",
+          taxCondition: "Responsable Inscripto",
           address: "Av. Córdoba 1234, CABA",
         })
       } else if (newCustomer.taxId === "20-25789456-8") {
         setNewCustomer({
           ...newCustomer,
           name: "Carlos Rodríguez",
-          taxStatus: "MONOTRIBUTISTA",
+          taxCondition: "Monotributista",
           address: "Calle Lavalle 789, CABA",
         })
       }
@@ -116,54 +127,27 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
   }
 
   // Guardar nuevo cliente
-  const saveNewCustomer = async () => {
+  const saveNewCustomer = () => {
     if (!newCustomer.name || !newCustomer.taxId) return
 
-    setLoading(true)
-    setError(null)
-
-    try {
-      const customerData = {
-        name: newCustomer.name,
-        documentType: newCustomer.documentType || "DNI",
-        documentNumber: newCustomer.documentNumber || "",
-        taxStatus: mapTaxConditionToAPI(newCustomer.taxStatus || "Consumidor Final"),
-        email: newCustomer.email || "",
-        address: newCustomer.address || "",
-        taxId: newCustomer.taxId,
-      }
-
-      const createdCustomer = await createCustomer(customerData)
-      
-      // Convertir la respuesta de la API al formato del componente
-      const customerForUI = {
-        ...createdCustomer,
-        taxCondition: mapTaxConditionFromAPI(createdCustomer.taxStatus)
-      }
-      
-      // Actualizar la lista de clientes
-      setCustomers(prev => [...prev, createdCustomer])
-      
-      // Seleccionar el cliente recién creado
-      onSelectCustomer(customerForUI)
-      
-      // Resetear formulario
-      setIsAddingNew(false)
-      setNewCustomer({
-        documentType: "DNI",
-        taxStatus: "Consumidor Final",
-      })
-      setOpen(false)
-    } catch (error) {
-      setError("Error al crear cliente")
-      toast({
-        title: "Error al crear cliente",
-        description: error instanceof Error ? error.message : "Error inesperado",
-        variant: "destructive",
-      })
-    } finally {
-      setLoading(false)
+    const customer: Customer = {
+      id: `NEW-${Date.now()}`,
+      name: newCustomer.name,
+      documentType: newCustomer.documentType || "DNI",
+      documentNumber: newCustomer.documentNumber || "",
+      email: newCustomer.email || "",
+      address: newCustomer.address || "",
+      taxCondition: newCustomer.taxCondition as Customer["taxCondition"],
+      taxId: newCustomer.taxId,
     }
+
+    onSelectCustomer(customer)
+    setIsAddingNew(false)
+    setNewCustomer({
+      documentType: "DNI",
+      taxCondition: "Consumidor Final",
+    })
+    setOpen(false)
   }
 
   return (
@@ -203,9 +187,7 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
             </div>
 
             <ScrollArea className="h-[300px] rounded-md border p-2">
-              {loading ? (
-                <div className="p-4 text-center text-muted-foreground">Cargando clientes...</div>
-              ) : filteredCustomers.length > 0 ? (
+              {filteredCustomers.length > 0 ? (
                 <div className="space-y-2">
                   {filteredCustomers.map((customer) => (
                     <div
@@ -216,25 +198,15 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
                       <div>
                         <div className="font-medium">{customer.name}</div>
                         <div className="text-sm text-muted-foreground">
-                          {customer.documentType}: {customer.documentNumber} 
-                          {customer.taxId && ` | CUIT/CUIL: ${customer.taxId}`}
+                          {customer.documentType}: {customer.documentNumber} | CUIT/CUIL: {customer.taxId}
                         </div>
-                        {customer.email && (
-                          <div className="text-xs text-muted-foreground">
-                            Email: {customer.email}
-                          </div>
-                        )}
                       </div>
-                      <Badge>
-                        {mapTaxConditionFromAPI(customer.taxStatus)}
-                      </Badge>
+                      <Badge>{customer.taxCondition}</Badge>
                     </div>
                   ))}
                 </div>
               ) : (
-                <div className="p-4 text-center text-muted-foreground">
-                  No se encontraron clientes con esa búsqueda
-                </div>
+                <div className="p-4 text-center text-muted-foreground">No se encontraron clientes con esa búsqueda</div>
               )}
             </ScrollArea>
           </>
@@ -260,8 +232,13 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
                 <select
                   id="taxCondition"
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  value={newCustomer.taxStatus}
-                  onChange={(e) => setNewCustomer({ ...newCustomer, taxStatus: e.target.value })}
+                  value={newCustomer.taxCondition}
+                  onChange={(e) =>
+                    setNewCustomer({
+                      ...newCustomer,
+                      taxCondition: e.target.value as Customer["taxCondition"],
+                    })
+                  }
                 >
                   <option value="Responsable Inscripto">Responsable Inscripto</option>
                   <option value="Monotributista">Monotributista</option>
@@ -329,12 +306,10 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
         <DialogFooter>
           {isAddingNew ? (
             <>
-              <Button variant="outline" onClick={() => setIsAddingNew(false)} disabled={loading}>
+              <Button variant="outline" onClick={() => setIsAddingNew(false)}>
                 Cancelar
               </Button>
-              <Button onClick={saveNewCustomer} disabled={loading}>
-                {loading ? "Guardando..." : "Guardar Cliente"}
-              </Button>
+              <Button onClick={saveNewCustomer}>Guardar Cliente</Button>
             </>
           ) : (
             <Button variant="outline" onClick={() => setOpen(false)}>

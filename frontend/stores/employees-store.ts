@@ -7,6 +7,7 @@ import {
   createEmployee,
   updateEmployee,
   deleteEmployee,
+  verifyPin as apiVerifyPin, // <-- importar verifyPin de api.ts
   type User, // Using User type for employees
   type CreateEmployeeRequest,
   type UpdateEmployeeRequest,
@@ -148,17 +149,9 @@ export const useEmployeesStore = create<EmployeesStore>()(
       verifyPin: async (pin: string) => {
         set({ isLoading: true, error: null })
         try {
-          const res = await fetch("/api/sales/validate-pin", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              Authorization: `Bearer ${localStorage.getItem("token")}`,
-            },
-            body: JSON.stringify({ pin }),
-          })
-          const data = await res.json()
+          const data = await apiVerifyPin(pin)
           set({ isLoading: false })
-          if (data.success && data.userId) {
+          if (data && data.userId) {
             // Buscar el empleado en la lista local o recargar
             let employee = get().employees.find((e) => e.id === data.userId)
             if (!employee) {
@@ -166,7 +159,7 @@ export const useEmployeesStore = create<EmployeesStore>()(
             }
             return employee
           } else {
-            set({ error: data.error || "PIN incorrecto" })
+            set({ error: (data && data.error) || "PIN incorrecto" })
             return null
           }
         } catch (error) {

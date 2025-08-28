@@ -44,7 +44,7 @@ router.post("/", authenticateToken, requireRole(["ADMIN"]),
   async (req, res): Promise<void> => {
     const tenantId = (req as any).user.tenantId;
     try {
-      const created = await prisma.customer.create({ data: { ...req.body, tenantId } });
+      const created = await prisma.customer.create({ data: { ...req.body, tenantId, taxId: req.body.taxId } });
       res.status(201).json({ success: true, data: created });
       return;
     } catch (error: any) {
@@ -59,7 +59,7 @@ router.put("/:id", authenticateToken, requireRole(["ADMIN"]),
     const { id } = req.params;
     const tenantId = (req as any).user.tenantId;
     try {
-      const updated = await prisma.customer.updateMany({ where: { id, tenantId }, data: req.body });
+      const updated = await prisma.customer.updateMany({ where: { id, tenantId }, data: { ...req.body, taxId: req.body.taxId } });
       if (updated.count === 0) {
         res.status(404).json({ success: false, error: "Customer not found" });
         return;
