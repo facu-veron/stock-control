@@ -51,6 +51,36 @@ export function CartSummary({
   const [tempDiscount, setTempDiscount] = React.useState(discount)
   const [discountType, setDiscountType] = React.useState<"percentage" | "amount">("percentage")
 console.log(items)
+/* 
+este resultado me da el array 
+
+Array [ {…} ]
+​
+0: Object { id: "cmevfkxv10006twjo84xr5tjw", name: "Pantalon", price: "350000", … }
+​​
+category: "Pantalon"
+​​
+discount: undefined
+​​
+id: "cmevfkxv10006twjo84xr5tjw"
+​​
+name: "Pantalon"
+​​
+price: "350000"
+​​
+quantity: 2
+​​
+tax: 0
+​​
+taxRate: undefined
+​​
+total: NaN
+​​
+<prototype>: Object { … }
+​
+length: 1
+​
+<prototype>: Array [] */
   // Calcular totales con descuento
   const subtotalWithDiscount = totals.subtotal - discount
   const finalTotal = Math.max(0, subtotalWithDiscount + totals.tax)
