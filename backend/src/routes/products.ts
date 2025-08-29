@@ -320,14 +320,43 @@ router.delete("/:id", authenticateToken, requireRole(["ADMIN"]), async (req: Aut
     const tenantId = req.user!.tenantId;
     const { id } = req.params;
 
-    const deleted = await prisma.product.deleteMany({ where: { id, tenantId } });
-    if (deleted.count === 0) {
+    // First, check if the product exists
+    const product = await prisma.product.findFirst({
+      where: { id, tenantId },
+      include: {
+        saleItems: true
+      }
+    });
+
+    if (!product) {
       return res.status(404).json({ success: false, error: "Producto no encontrado" } as ApiResponse);
     }
 
+    // Check if product has been used in sales
+    if (product.saleItems.length > 0) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "No se puede eliminar el producto porque ha sido utilizado en ventas. Puede desactivarlo en su lugar.",
+        code: "PRODUCT_HAS_SALES"
+      } as ApiResponse);
+    }
+
+    // If no sales, we can safely delete
+    const deleted = await prisma.product.deleteMany({ where: { id, tenantId } });
+    
     return res.json({ success: true, message: "Producto eliminado exitosamente" } as ApiResponse);
   } catch (error) {
     console.error("Error eliminando producto:", error);
+    
+    // Handle specific Prisma foreign key constraint errors
+    if (error instanceof Error && error.message.includes('Foreign key constraint')) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "No se puede eliminar el producto porque está siendo utilizado en el sistema. Puede desactivarlo en su lugar.",
+        code: "FOREIGN_KEY_CONSTRAINT"
+      } as ApiResponse);
+    }
+    
     return res.status(500).json({ success: false, error: "Error interno del servidor" } as ApiResponse);
   }
 });
