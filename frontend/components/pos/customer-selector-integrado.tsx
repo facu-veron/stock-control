@@ -7,6 +7,7 @@ import { UserRound, Plus } from "lucide-react"
 import { AgregarClienteMejorado } from "./agregar-cliente-mejorado"
 import { type Cliente } from "@/lib/afip-client-types"
 import { type Customer } from "@/lib/api" // Tipo actual del sistema
+import { type TaxConditionUI } from "@/lib/afip-types"
 
 interface CustomerSelectorIntegradoProps {
   onSelectCustomer: (customer: Customer) => void;
@@ -34,10 +35,8 @@ export function CustomerSelectorIntegrado({
       documentNumber: cliente.numeroDocumento,
       taxStatus: mapearCondicionALegacy(cliente.condicionIVA),
       email: cliente.email,
-      phone: '', // No usado en nuevo formulario
       address: cliente.direccion,
       taxId: cliente.numeroDocumento, // Para compatibilidad
-      active: true,
       createdAt: new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
@@ -49,8 +48,8 @@ export function CustomerSelectorIntegrado({
   };
 
   // ✅ Mapeo de condición IVA a formato legacy
-  function mapearCondicionALegacy(condicion: string): string {
-    const mapeo: Record<string, string> = {
+  function mapearCondicionALegacy(condicion: string): TaxConditionUI {
+    const mapeo: Record<string, TaxConditionUI> = {
       'ResponsableInscripto': 'RESPONSABLE_INSCRIPTO',
       'Monotributista': 'MONOTRIBUTO', 
       'ConsumidorFinal': 'CONSUMIDOR_FINAL',
@@ -62,7 +61,7 @@ export function CustomerSelectorIntegrado({
       'MonotributistaSocial': 'MONOTRIBUTO_SOCIAL',
       'TrabajadorIndependiente': 'TRABAJADOR_INDEPENDIENTE_PROMOVIDO',
     };
-    return mapeo[condicion] || 'CONSUMIDOR_FINAL';
+    return mapeo[condicion] || 'CONSUMIDOR_FINAL' as TaxConditionUI;
   }
 
   return (
