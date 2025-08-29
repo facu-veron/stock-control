@@ -1,37 +1,31 @@
 // src/services/afip.service.ts
 import { Afip } from "afip.ts";
 import { prisma } from "../lib/prisma";
+import {
+  AFIP_DOCUMENT_TYPES,
+  AFIP_INVOICE_TYPES,
+  AFIP_TAX_CONDITIONS,
+  type AfipDocumentType,
+  type AfipInvoiceType,
+  type AfipTaxCondition,
+  type TaxConditionUI,
+  type InvoiceTypeUI,
+  type DocumentTypeUI,
+  convertTaxConditionUIToAfip,
+  convertDocumentTypeUIToAfip,
+  convertInvoiceTypeUIToAfip,
+  validateInvoiceTypeForCustomer,
+  validateDocumentTypeForTaxCondition,
+} from "../types/afip-types";
 
-export type CondicionIVAReceptorId =
-  | 1   // Responsable Inscripto
-  | 4   // Sujeto Exento
-  | 5   // Consumidor Final
-  | 6   // Responsable Monotributo
-  | 7   // No Categorizado
-  | 8   // Proveedor del Exterior
-  | 9   // Cliente del Exterior
-  | 10  // IVA Liberado – Ley 19.640
-  | 13  // Monotributista Social
-  | 15  // IVA No Alcanzado
-  | 16; // Monotributo Trabajador Independiente Promovido
-
-export type CustomerTaxStatus =
-  | "RESPONSABLE_INSCRIPTO"
-  | "MONOTRIBUTO"
-  | "EXENTO"
-  | "CONSUMIDOR_FINAL"
-  | "NO_CATEGORIZADO"
-  | "NO_ALCANZADO"
-  | "LIBERADO_19640"
-  | "MONOTRIBUTO_SOCIAL"
-  | "TRABAJADOR_PROMOVIDO"
-  | "EXTERIOR_PROVEEDOR"
-  | "EXTERIOR_CLIENTE";
+// ✅ TIPOS HEREDADOS (mantener compatibilidad temporal)
+export type CondicionIVAReceptorId = AfipTaxCondition;
+export type CustomerTaxStatus = TaxConditionUI;
 
 export interface AfipInvoiceData {
   ptoVta: number;
-  cbteTipo: number; // 6 = Factura B, 1 = Factura A, 11 = Factura C
-  docTipo: number;  // 99 = CF, 80 = CUIT, 96 = DNI
+  cbteTipo: AfipInvoiceType; // ✅ Usar códigos AFIP tipados
+  docTipo: AfipDocumentType; // ✅ Usar códigos AFIP tipados
   docNro: number;
   impNeto: number;
   impIVA: number;
@@ -40,10 +34,10 @@ export interface AfipInvoiceData {
   impOpEx?: number;
   impTrib?: number;
 
-  // NUEVO: permitir indicar concepto y condición IVA del receptor
+  // ✅ NUEVO: permitir indicar concepto y condición IVA del receptor
   concepto?: 1 | 2 | 3; // 1=Productos, 2=Servicios, 3=Ambos
-  condicionIVAReceptorId?: CondicionIVAReceptorId; // override explícito
-  taxStatus?: CustomerTaxStatus; // inferencia a partir de estado fiscal del cliente
+  condicionIVAReceptorId?: AfipTaxCondition; // ✅ override explícito tipado
+  taxStatus?: TaxConditionUI; // ✅ inferencia a partir de estado fiscal del cliente
 
   // (solo uso informativo para tus propios registros)
   conceptoItems: Array<{
@@ -100,37 +94,31 @@ export class AfipService {
     return Number.isFinite(num) ? num : 0;
   }
 
-  /** Mapea estado fiscal del cliente a CondicionIVAReceptorId */
-  private mapTaxStatusToCondId(status?: CustomerTaxStatus): CondicionIVAReceptorId | undefined {
-    switch (status) {
-      case "RESPONSABLE_INSCRIPTO": return 1;
-      case "EXENTO": return 4;
-      case "CONSUMIDOR_FINAL": return 5;
-      case "MONOTRIBUTO": return 6;
-      case "NO_CATEGORIZADO": return 7;
-      case "EXTERIOR_PROVEEDOR": return 8;
-      case "EXTERIOR_CLIENTE": return 9;
-      case "LIBERADO_19640": return 10;
-      case "MONOTRIBUTO_SOCIAL": return 13;
-      case "NO_ALCANZADO": return 15;
-      case "TRABAJADOR_PROMOVIDO": return 16;
-      default: return undefined;
+  /** ✅ Mapea estado fiscal del cliente a CondicionIVAReceptorId usando tipos estandarizados */
+  private mapTaxStatusToCondId(status?: TaxConditionUI): AfipTaxCondition | undefined {
+    if (!status) return undefined;
+    
+    try {
+      return convertTaxConditionUIToAfip(status);
+    } catch (error) {
+      console.warn(`⚠️ Estado fiscal no reconocido: ${status}`);
+      return undefined;
     }
   }
 
   /**
-   * Resuelve CondicionIVAReceptorId:
+   * ✅ Resuelve CondicionIVAReceptorId usando tipos estandarizados:
    * 1) si viene explícito, lo usa;
    * 2) si hay taxStatus, lo mapea;
-   * 3) heurística por DocTipo:
-   *    - 99 (CF) o 96 (DNI) => 5 (Consumidor Final)
-   *    - 80 (CUIT) => 1 (RI) por defecto (ajustá según tus datos de cliente)
+   * 3) heurística por DocTipo usando códigos AFIP oficiales
+   * 4) considera el tipo de comprobante para evitar incompatibilidades
    */
   private resolveCondIVAReceptorId(params: {
-    explicitId?: CondicionIVAReceptorId;
-    taxStatus?: CustomerTaxStatus;
-    docTipo?: number;
-  }): CondicionIVAReceptorId {
+    explicitId?: AfipTaxCondition;
+    taxStatus?: TaxConditionUI;
+    docTipo?: AfipDocumentType;
+    cbteTipo?: AfipInvoiceType; // ✅ NUEVO: considerar tipo de comprobante
+  }): AfipTaxCondition {
     console.log("🔍 Resolviendo CondicionIVAReceptorId:", params);
     
     if (params.explicitId) {
@@ -144,16 +132,26 @@ export class AfipService {
       return fromStatus;
     }
 
-    // Heurística por DocTipo
-    let result: CondicionIVAReceptorId;
-    if (params.docTipo === 99 || params.docTipo === 96) {
-      result = 5; // Consumidor Final
-      console.log("✅ Heurística por DocTipo (99/96 - CF):", result);
-    } else if (params.docTipo === 80) {
-      result = 1; // RI por default si no sabemos más
-      console.log("✅ Heurística por DocTipo (80 - CUIT -> RI):", result);
+    // ✅ Heurística mejorada considerando tipo de comprobante y DocTipo
+    let result: AfipTaxCondition;
+    
+    if (params.docTipo === AFIP_DOCUMENT_TYPES.CF || params.docTipo === AFIP_DOCUMENT_TYPES.DNI) {
+      result = AFIP_TAX_CONDITIONS.CONSUMIDOR_FINAL;
+      console.log("✅ Heurística por DocTipo (CF/DNI -> CF):", result);
+    } else if (params.docTipo === AFIP_DOCUMENT_TYPES.CUIT) {
+      // ✅ Para CUIT, considerar el tipo de comprobante
+      if (params.cbteTipo === AFIP_INVOICE_TYPES.FACTURA_A) {
+        result = AFIP_TAX_CONDITIONS.RESPONSABLE_INSCRIPTO; // Factura A siempre RI
+        console.log("✅ Heurística CUIT + FACTURA_A -> RI:", result);
+      } else if (params.cbteTipo === AFIP_INVOICE_TYPES.FACTURA_B) {
+        result = AFIP_TAX_CONDITIONS.MONOTRIBUTO; // Factura B con CUIT probablemente Monotrib
+        console.log("✅ Heurística CUIT + FACTURA_B -> MONOTRIBUTO:", result);
+      } else {
+        result = AFIP_TAX_CONDITIONS.RESPONSABLE_INSCRIPTO; // Default para otros casos
+        console.log("✅ Heurística CUIT (otro tipo) -> RI:", result);
+      }
     } else {
-      result = 5; // Consumidor Final como fallback más seguro para Factura B
+      result = AFIP_TAX_CONDITIONS.CONSUMIDOR_FINAL; // Fallback más seguro
       console.log("✅ Fallback seguro (CF):", result);
     }
     
@@ -206,6 +204,7 @@ export class AfipService {
         explicitId: invoiceData.condicionIVAReceptorId,
         taxStatus: invoiceData.taxStatus,
         docTipo: invoiceData.docTipo,
+        cbteTipo: invoiceData.cbteTipo, // ✅ NUEVO: considerar tipo de comprobante
       });
 
       // Preparar datos para afip.ts (estructura que acepta la lib)
@@ -469,11 +468,11 @@ export class AfipService {
 
     return result;
   } */
-// Procesa facturación desde una venta de tu sistema - VERSIÓN MEJORADA
+// ✅ Procesa facturación desde una venta de tu sistema - VERSIÓN MEJORADA CON TIPOS
 async procesarFacturacionFromSale(params: {
   tenantId: string;
   sale: any;
-  tipoFactura: string;
+  tipoFactura: InvoiceTypeUI;
   puntoVenta: number;
   customer?: any;
 }): Promise<AfipInvoiceResponse> {
@@ -497,14 +496,11 @@ async procesarFacturacionFromSale(params: {
     throw new Error("La venta no pertenece al tenant especificado - Violación de seguridad multitenant");
   }
 
-  const tiposFactura = {
-    FACTURA_A: 1,
-    FACTURA_B: 6,
-    FACTURA_C: 11,
-  } as const;
-
-  const cbteTipo = (tiposFactura as any)[tipoFactura];
-  if (!cbteTipo) {
+  // ✅ Usar convertidor tipado para obtener código AFIP
+  let cbteTipo: AfipInvoiceType;
+  try {
+    cbteTipo = convertInvoiceTypeUIToAfip(tipoFactura);
+  } catch (error) {
     throw new Error(`Tipo de factura no válido: ${tipoFactura}`);
   }
 
@@ -521,35 +517,45 @@ async procesarFacturacionFromSale(params: {
     grandTotal: sale.grandTotal
   });
 
-  // Doc del receptor - puede venir del customer de la sale O del parámetro customer inline
-  let docTipo = 99; // CF por defecto
+  // ✅ Doc del receptor - puede venir del customer de la sale O del parámetro customer inline
+  let docTipo: AfipDocumentType = AFIP_DOCUMENT_TYPES.CF; // CF por defecto
   let docNro = 0;
-  let taxStatus: CustomerTaxStatus | undefined;
+  let taxStatus: TaxConditionUI | undefined;
   
   // Priorizar customer inline en params, luego sale.customer
   const customerData = params.customer || sale.customer;
   
   if (customerData && customerData.documentType && customerData.documentNumber) {
-    switch (customerData.documentType) {
-      case "CUIT":
-        docTipo = 80;
-        docNro = parseInt(String(customerData.documentNumber).replace(/\D/g, ""), 10);
-        break;
-      case "DNI":
-        docTipo = 96;
-        docNro = parseInt(String(customerData.documentNumber).replace(/\D/g, ""), 10);
-        break;
-      default:
-        docTipo = 99;
-        docNro = 0;
+    try {
+      // ✅ Convertir documentType de UI a código AFIP
+      const documentTypeUI = customerData.documentType as DocumentTypeUI;
+      docTipo = convertDocumentTypeUIToAfip(documentTypeUI);
+      docNro = parseInt(String(customerData.documentNumber).replace(/\D/g, ""), 10);
+      
+      // ✅ Validar que el número de documento sea válido
+      if (isNaN(docNro) || docNro <= 0) {
+        throw new Error(`Número de documento inválido: ${customerData.documentNumber}`);
+      }
+      
+    } catch (error) {
+      console.warn("⚠️ Tipo de documento no reconocido, usando CF:", customerData.documentType);
+      docTipo = AFIP_DOCUMENT_TYPES.CF;
+      docNro = 0;
     }
-    taxStatus = customerData.taxStatus as CustomerTaxStatus;
+    
+    taxStatus = customerData.taxStatus as TaxConditionUI;
   }
   
   console.log("👤 Datos del receptor:", { docTipo, docNro, taxStatus, hasCustomer: !!customerData });
 
-  if (cbteTipo === 1 && docTipo !== 80) {
-    throw new Error("Para Factura A, el cliente debe tener CUIT válido");
+  // ✅ Validación mejorada para Factura A
+  if (cbteTipo === AFIP_INVOICE_TYPES.FACTURA_A) {
+    if (docTipo !== AFIP_DOCUMENT_TYPES.CUIT) {
+      throw new Error("Para Factura A, el cliente debe tener CUIT válido");
+    }
+    if (!taxStatus || taxStatus !== 'RESPONSABLE_INSCRIPTO') {
+      throw new Error("Para Factura A, el cliente debe ser Responsable Inscripto");
+    }
   }
 
   const invoiceData: AfipInvoiceData = {

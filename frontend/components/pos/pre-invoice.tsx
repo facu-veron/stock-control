@@ -2,6 +2,7 @@
 import { Button } from "@/components/ui/button"
 import type { CartItem, InvoiceType } from "@/components/pos/pos-interface"
 import type { User as Employee, Customer } from "@/lib/api"
+import { TAX_CONDITION_LABELS } from "@/lib/afip-types"
 
 import { ArrowLeft, FileText, AlertCircle, Receipt, Banknote, CreditCard, DollarSign } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -38,8 +39,8 @@ export function PreInvoice({
   onBack,
   onConfirm,
 }: PreInvoiceProps) {
-  // Determinar si se debe discriminar IVA
-  const showDetailedTax = documentType === "factura" && invoiceType === "A"
+  // ✅ Determinar si se debe discriminar IVA usando tipos estandarizados
+  const showDetailedTax = documentType === "factura" && invoiceType === "FACTURA_A"
 
   // Calcular totales con descuento
   const subtotalWithDiscount = Math.max(0, totals.subtotal - discount)
@@ -90,7 +91,7 @@ export function PreInvoice({
             ) : (
               <>
                 <FileText className="h-4 w-4 mr-1" />
-                Factura {invoiceType}
+                Factura {invoiceType?.replace('FACTURA_', '') || invoiceType}
               </>
             )}
           </Badge>
@@ -143,7 +144,9 @@ export function PreInvoice({
                 </div>
                 <div className="grid grid-cols-3 gap-1">
                   <div className="text-sm font-medium">Condición IVA:</div>
-                  <div className="col-span-2">{customer.taxCondition}</div>
+                  <div className="col-span-2">
+                    {TAX_CONDITION_LABELS[customer.taxStatus] || customer.taxCondition || customer.taxStatus}
+                  </div>
                 </div>
                 <div className="grid grid-cols-3 gap-1">
                   <div className="text-sm font-medium">Dirección:</div>

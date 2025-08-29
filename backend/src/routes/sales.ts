@@ -6,6 +6,13 @@ import { authenticateToken } from "../middleware/auth";
 import type { AuthenticatedRequest } from "../types";
 import bcrypt from "bcryptjs";
 import { afipService } from "../services/afip.service";
+import { 
+  AFIP_INVOICE_TYPES,
+  type InvoiceTypeUI,
+  type AfipInvoiceRequest,
+  validateInvoiceTypeForCustomer,
+  validateDocumentTypeForTaxCondition
+} from "../types/afip-types";
 
 
 const router = Router();
@@ -162,7 +169,15 @@ router.post(
     body("items.*.quantity").isInt({ min: 1 }),
     body("items.*.unitPrice").isFloat({ min: 0 }),
     body("invoiceType").optional().isIn(["TICKET", "FACTURA_A", "FACTURA_B", "FACTURA_C"]),
-    body("puntoVenta").optional().isInt({ min: 1 })
+    body("puntoVenta").optional().isInt({ min: 1 }),
+    body("customer").optional().isObject(),
+    body("customer.documentType").optional().isIn(["CUIT", "CUIL", "DNI", "CF", "PASSPORT"]),
+    body("customer.taxStatus").optional().isIn([
+      "RESPONSABLE_INSCRIPTO", "EXENTO", "CONSUMIDOR_FINAL", "MONOTRIBUTO", 
+      "NO_CATEGORIZADO", "PROVEEDOR_EXTERIOR", "CLIENTE_EXTERIOR",
+      "LIBERADO_LEY_19640", "MONOTRIBUTO_SOCIAL", "NO_ALCANZADO", 
+      "TRABAJADOR_INDEPENDIENTE_PROMOVIDO"
+    ])
   ],
   async (req: AuthenticatedRequest, res:Response) => {
     const errors = validationResult(req);
@@ -181,8 +196,47 @@ router.post(
       items, 
       invoiceType = "TICKET",
       puntoVenta,
-      notes 
+      notes,
+      customer: customerData
     } = req.body;
+
+    // ✅ VALIDACIONES CRÍTICAS DE COMPATIBILIDAD AFIP
+    if (invoiceType !== "TICKET") {
+      // Validar punto de venta para facturas
+      if (!puntoVenta || puntoVenta < 1) {
+        return res.status(400).json({ 
+          success: false, 
+          error: "Punto de venta es requerido para facturas electrónicas" 
+        });
+      }
+
+      // Si hay datos de cliente inline, validar consistencia
+      if (customerData) {
+        if (customerData.documentType && customerData.taxStatus) {
+          const docValidation = validateDocumentTypeForTaxCondition(
+            customerData.documentType, 
+            customerData.taxStatus
+          );
+          if (!docValidation.valid) {
+            return res.status(400).json({ 
+              success: false, 
+              error: `Error en datos del cliente: ${docValidation.error}` 
+            });
+          }
+        }
+
+        const invoiceValidation = validateInvoiceTypeForCustomer(
+          invoiceType as InvoiceTypeUI, 
+          customerData.taxStatus
+        );
+        if (!invoiceValidation.valid) {
+          return res.status(400).json({ 
+            success: false, 
+            error: `Error de compatibilidad: ${invoiceValidation.error}` 
+          });
+        }
+      }
+    }
 
     try {
       // Verificar que el empleado pertenece al tenant
@@ -335,9 +389,9 @@ router.post(
           const comprobanteRespuesta = await afipService.procesarFacturacionFromSale({
             tenantId,
             sale: createdSale,
-            tipoFactura: invoiceType as any,
+            tipoFactura: invoiceType as InvoiceTypeUI,
             puntoVenta,
-            customer: req.body.customer
+            customer: customerData
           });
 
           if (comprobanteRespuesta) {
@@ -493,7 +547,7 @@ router.post(
       const comprobanteRespuesta = await afipService.procesarFacturacionFromSale({
         tenantId,
         sale,
-        tipoFactura: invoiceType,
+        tipoFactura: invoiceType as InvoiceTypeUI,
         puntoVenta
       });
 

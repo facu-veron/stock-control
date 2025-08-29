@@ -149,20 +149,21 @@ export const useEmployeesStore = create<EmployeesStore>()(
       verifyPin: async (pin: string) => {
         set({ isLoading: true, error: null })
         try {
-          const data = await apiVerifyPin(pin)
+          console.log("🔍 Store verifyPin: llamando apiVerifyPin con pin:", pin);
+          const employee = await apiVerifyPin(pin)
+          console.log("🔍 Store verifyPin: resultado de apiVerifyPin:", employee);
           set({ isLoading: false })
-          if (data && data.userId) {
-            // Buscar el empleado en la lista local o recargar
-            let employee = get().employees.find((e) => e.id === data.userId)
-            if (!employee) {
-              employee = await getEmployeeById(data.userId)
-            }
+          
+          if (employee && employee.id) {
+            console.log("✅ Store verifyPin: devolviendo employee válido:", employee);
             return employee
           } else {
-            set({ error: (data && data.error) || "PIN incorrecto" })
+            console.error("❌ Store verifyPin: employee inválido:", employee);
+            set({ error: "PIN incorrecto" })
             return null
           }
         } catch (error) {
+          console.error("🚨 Store verifyPin: error capturado:", error);
           set({ error: "Error al verificar PIN", isLoading: false })
           return null
         }

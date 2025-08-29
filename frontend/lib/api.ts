@@ -1,5 +1,13 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || "http://localhost:3001/api"
 
+// ✅ Importar tipos estandarizados
+import type { 
+  DocumentTypeUI, 
+  TaxConditionUI, 
+  InvoiceTypeUI,
+  StandardizedCustomer 
+} from './afip-types';
+
 // Tipos definidos en el frontend
 export interface User {
   id: string
@@ -157,13 +165,14 @@ export interface UpdateEmployeeRequest {
 export interface CreateSaleRequest {
   employeeId: string;
   customerId?: string;
+  customer?: Partial<Customer>; // ✅ Agregar customer inline
   items: Array<{
     productId: string;
     quantity: number;
     unitPrice: number;
     discount?: number;
   }>;
-  invoiceType?: string;
+  invoiceType: InvoiceTypeUI; // ✅ Hacer requerido y tipado
   puntoVenta?: number;
   notes?: string;
   discount?: number;
@@ -471,22 +480,46 @@ export const createTag = async (tag: Omit<Tag, "id">): Promise<Tag> => {
 }
 
 export const createSale = async (sale: CreateSaleRequest) => {
+  console.log("🔍 createSale: enviando datos:", sale);
   const response = await fetchApi<any>("/sales/create", {
     method: "POST",
     body: JSON.stringify(sale),
-  }) as ApiResponse<any>;
-  if (response.success) {
-    return response.data;
+  });
+  console.log("🔍 createSale: respuesta completa del backend:", response);
+  
+  // ✅ Verificar si la respuesta tiene la estructura esperada
+  if (response && response.success) {
+    console.log("✅ createSale: respuesta exitosa, datos:", response.data || response);
+    return response.data || response;
   }
-  throw new Error(response.error || "Failed to create sale");
+  
+  console.error("❌ createSale: respuesta con error:", response);
+  throw new Error(response?.error || response?.message || "Failed to create sale");
 }
 
 export const verifyPin = async (pin: string): Promise<any> => {
   const response = await fetchApi<any>("/sales/validate-pin", {
     method: "POST",
     body: JSON.stringify({ pin }),
-  }) as ApiResponse<any>;
-  return response;
+  }) as any; // ✅ No asumir estructura ApiResponse
+  
+  console.log("🔍 Respuesta completa de verifyPin:", response);
+  
+  if (response.success) {
+    // ✅ El backend devuelve userId/userName directamente en la respuesta
+    const employee = {
+      id: response.userId,
+      name: response.userName,
+      email: "", // El backend no devuelve email en esta respuesta
+      role: "EMPLOYEE" as const, // Asumir EMPLOYEE por defecto
+      active: true,
+    };
+    
+    console.log("✅ Employee creado:", employee);
+    return employee;
+  }
+  
+  throw new Error(response.error || "PIN verification failed");
 };
 
 // Sales API
@@ -506,18 +539,20 @@ export const getSaleById = async (id: string): Promise<any> => {
   throw new Error(response.error || "Failed to fetch sale")
 };
 
+
+
 export interface Customer {
   id: string;
   name: string;
-  documentType: string;
+  documentType: DocumentTypeUI;
   documentNumber: string;
-  taxStatus: string;
+  taxStatus: TaxConditionUI;
   email?: string;
   phoneNumber?: string;
   address?: string;
   city?: string;
   state?: string;
-  taxCondition?: string;
+  taxCondition?: TaxConditionUI; // ✅ Duplicado temporal por compatibilidad
   postalCode?: string;
   country?: string;
   taxId?: string;
@@ -527,9 +562,9 @@ export interface Customer {
 
 export interface CreateCustomerRequest {
   name: string;
-  documentType: string;
+  documentType: DocumentTypeUI;
   documentNumber: string;
-  taxStatus: string;
+  taxStatus: TaxConditionUI;
   email?: string;
   phoneNumber?: string;
   address?: string;
@@ -559,14 +594,27 @@ export const getCustomerById = async (id: string): Promise<Customer> => {
 };
 
 export const createCustomer = async (customer: CreateCustomerRequest): Promise<Customer> => {
-  const response = await fetchApi<Customer>("/customers", {
-    method: "POST",
-    body: JSON.stringify(customer),
-  }) as ApiResponse<Customer>;
-  if (response.success) {
-    return response.data;
+  console.log("🔍 createCustomer: datos a enviar:", customer);
+  
+  try {
+    const response = await fetchApi<Customer>("/customers", {
+      method: "POST",
+      body: JSON.stringify(customer),
+    }) as ApiResponse<Customer>;
+    
+    console.log("🔍 createCustomer: respuesta completa:", response);
+    
+    if (response.success) {
+      console.log("✅ createCustomer: cliente creado exitosamente:", response.data);
+      return response.data;
+    }
+    
+    console.error("❌ createCustomer: error del backend:", response.error);
+    throw new Error(response.error || "Failed to create customer");
+  } catch (error) {
+    console.error("🚨 createCustomer: error en fetchApi:", error);
+    throw error;
   }
-  throw new Error(response.error || "Failed to create customer");
 };
 
 export const updateCustomer = async (id: string, customer: UpdateCustomerRequest): Promise<Customer> => {

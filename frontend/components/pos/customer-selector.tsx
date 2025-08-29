@@ -13,33 +13,23 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import type { Customer } from "@/lib/api"
+import type { Customer, CreateCustomerRequest } from "@/lib/api"
 import { UserRound, Search, Plus } from "lucide-react"
 import { Badge } from "@/components/ui/badge"
 import { ScrollArea } from "@/components/ui/scroll-area"
 import { getCustomers, createCustomer } from "@/lib/api"
 import { toast } from "@/components/ui/use-toast"
-
-// Mapeo de condiciones fiscales para compatibilidad con API
-const mapTaxConditionToAPI = (condition: string) => {
-  const mapping: Record<string, string> = {
-    "Responsable Inscripto": "RESPONSABLE_INSCRIPTO",
-    "Monotributista": "MONOTRIBUTISTA", 
-    "Exento": "EXENTO",
-    "Consumidor Final": "CONSUMIDOR_FINAL"
-  }
-  return mapping[condition] || "CONSUMIDOR_FINAL"
-}
-
-const mapTaxConditionFromAPI = (status: string) => {
-  const mapping: Record<string, string> = {
-    "RESPONSABLE_INSCRIPTO": "Responsable Inscripto",
-    "MONOTRIBUTISTA": "Monotributista", 
-    "EXENTO": "Exento",
-    "CONSUMIDOR_FINAL": "Consumidor Final"
-  }
-  return mapping[status] || "Consumidor Final"
-}
+import {
+  type DocumentTypeUI,
+  type TaxConditionUI,
+  TAX_CONDITION_OPTIONS,
+  POS_DOCUMENT_TYPE_OPTIONS,
+  TAX_CONDITION_LABELS,
+  validateDocumentTypeForTaxCondition,
+  formatDocumentNumber,
+  formatDocumentForAPI,
+  validateDocumentNumber,
+} from "@/lib/afip-types"
 
 interface CustomerSelectorProps {
   onSelectCustomer: (customer: Customer) => void
@@ -50,8 +40,12 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
   const [open, setOpen] = React.useState(false)
   const [searchTerm, setSearchTerm] = React.useState("")
   const [newCustomer, setNewCustomer] = React.useState<Partial<Customer>>({
-    documentType: "DNI",
-    taxStatus: "Consumidor Final",
+    documentType: "DNI" as DocumentTypeUI,
+    taxStatus: "CONSUMIDOR_FINAL" as TaxConditionUI,
+    documentNumber: "",
+    name: "",
+    email: "",
+    phone: "",
   })
   const [isAddingNew, setIsAddingNew] = React.useState(false)
   const [customers, setCustomers] = React.useState<Customer[]>([])
@@ -91,43 +85,155 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
     setOpen(false)
   }
 
-  // Consultar datos fiscales (simulado - mantenemos la funcionalidad original)
+  // ✅ Auto-sincronizar campos cuando cambia el tipo de documento
+  const handleDocumentTypeChange = (newDocumentType: DocumentTypeUI) => {
+    console.log("🔍 Cambiando documentType a:", newDocumentType);
+    
+    setNewCustomer(prev => {
+      const updated = { ...prev, documentType: newDocumentType };
+      
+      // ✅ Auto-ajustar taxStatus basado en documentType (lógica simplificada)
+      if (newDocumentType === "CUIT") {
+        updated.taxStatus = "RESPONSABLE_INSCRIPTO"; // CUIT siempre RI
+        console.log("✅ CUIT seleccionado -> cambiando a RESPONSABLE_INSCRIPTO");
+      } else if (newDocumentType === "DNI" || newDocumentType === "CF") {
+        updated.taxStatus = "CONSUMIDOR_FINAL"; // DNI/CF siempre CF
+        console.log("✅ DNI/CF seleccionado -> cambiando a CONSUMIDOR_FINAL");
+      }
+      
+      // Limpiar número de documento al cambiar tipo
+      updated.documentNumber = "";
+      
+      console.log("✅ Estado actualizado:", { 
+        documentType: updated.documentType, 
+        taxStatus: updated.taxStatus 
+      });
+      
+      return updated;
+    });
+  }
+
+  // ✅ Auto-sincronizar cuando cambia taxId
+  const handleTaxIdChange = (newTaxId: string) => {
+    setNewCustomer(prev => {
+      const updated = { ...prev, taxId: newTaxId };
+      
+      // Si el tipo de documento es CUIT/CUIL, sincronizar documentNumber
+      if ((prev.documentType === "CUIT" || prev.documentType === "CUIL") && newTaxId) {
+        updated.documentNumber = newTaxId;
+      }
+      
+      return updated;
+    });
+  }
+
+  // ✅ Consultar datos fiscales (simulado - usando tipos estandarizados)
   const fetchTaxData = () => {
     if (!newCustomer.taxId) return
 
-    // Simulación de consulta a AFIP - mantenemos la lógica original
+    // Simulación de consulta a AFIP con tipos estandarizados
     setTimeout(() => {
       if (newCustomer.taxId === "30-71234567-8") {
         setNewCustomer({
           ...newCustomer,
           name: "Empresa ABC S.A.",
-          taxStatus: "RESPONSABLE_INSCRIPTO",
+          documentType: "CUIT" as DocumentTypeUI,
+          documentNumber: "30-71234567-8", // ✅ Asegurar que documentNumber coincida
+          taxStatus: "RESPONSABLE_INSCRIPTO" as TaxConditionUI,
           address: "Av. Córdoba 1234, CABA",
+          email: "facturacion@empresaabc.com.ar",
         })
       } else if (newCustomer.taxId === "20-25789456-8") {
         setNewCustomer({
           ...newCustomer,
           name: "Carlos Rodríguez",
-          taxStatus: "MONOTRIBUTISTA",
+          documentType: "CUIL" as DocumentTypeUI,
+          documentNumber: "20-25789456-8", // ✅ Asegurar que documentNumber coincida
+          taxStatus: "MONOTRIBUTO" as TaxConditionUI,
           address: "Calle Lavalle 789, CABA",
+          email: "carlos.rodriguez@email.com",
         })
       }
     }, 1000)
   }
 
-  // Guardar nuevo cliente
+  // ✅ Guardar nuevo cliente con validaciones
   const saveNewCustomer = async () => {
-    if (!newCustomer.name || !newCustomer.taxId) return
+    if (!newCustomer.name) {
+      toast({
+        title: "Error de validación",
+        description: "El nombre es requerido",
+        variant: "destructive",
+      })
+      return
+    }
+
+    // ✅ Validar compatibilidad documentType y taxStatus
+    if (newCustomer.documentType && newCustomer.taxStatus) {
+      const validation = validateDocumentTypeForTaxCondition(
+        newCustomer.documentType,
+        newCustomer.taxStatus
+      );
+      if (!validation.valid) {
+        toast({
+          title: "Error de validación",
+          description: validation.error,
+          variant: "destructive",
+        })
+        return
+      }
+    }
+
+    // ✅ Validar número de documento si existe
+    if (newCustomer.documentNumber && newCustomer.documentType) {
+      if (!validateDocumentNumber(newCustomer.documentNumber, newCustomer.documentType)) {
+        toast({
+          title: "Error de validación",
+          description: "Número de documento inválido para el tipo seleccionado",
+          variant: "destructive",
+        })
+        return
+      }
+    }
+
+    // ✅ Para CUIT/CUIL, asegurar que documentNumber y taxId coincidan si están presentes
+    if ((newCustomer.documentType === "CUIT" || newCustomer.documentType === "CUIL") && 
+        newCustomer.taxId && newCustomer.documentNumber && 
+        newCustomer.taxId !== newCustomer.documentNumber) {
+      // Auto-sincronizar si taxId está completo pero documentNumber no
+      if (!newCustomer.documentNumber && newCustomer.taxId) {
+        setNewCustomer(prev => ({ ...prev, documentNumber: newCustomer.taxId }));
+      } else {
+        toast({
+          title: "Error de validación",
+          description: "El número de documento debe coincidir con el CUIT/CUIL ingresado",
+          variant: "destructive",
+        })
+        return
+      }
+    }
 
     setLoading(true)
     setError(null)
 
     try {
-      const customerData = {
+      // ✅ Formatear documentNumber para API (sin guiones)
+      const formattedDocumentNumber = newCustomer.documentNumber 
+        ? formatDocumentForAPI(newCustomer.documentNumber)
+        : "";
+      
+      console.log("🔍 Enviando al API:", {
+        documentType: newCustomer.documentType,
+        documentNumber: newCustomer.documentNumber,
+        formattedDocumentNumber,
+        taxStatus: newCustomer.taxStatus
+      });
+      
+      const customerData: CreateCustomerRequest = {
         name: newCustomer.name,
         documentType: newCustomer.documentType || "DNI",
-        documentNumber: newCustomer.documentNumber || "",
-        taxStatus: mapTaxConditionToAPI(newCustomer.taxStatus || "Consumidor Final"),
+        documentNumber: formattedDocumentNumber, // ✅ Sin guiones para API
+        taxStatus: newCustomer.taxStatus || "CONSUMIDOR_FINAL",
         email: newCustomer.email || "",
         address: newCustomer.address || "",
         taxId: newCustomer.taxId,
@@ -135,10 +241,10 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
 
       const createdCustomer = await createCustomer(customerData)
       
-      // Convertir la respuesta de la API al formato del componente
-      const customerForUI = {
+      // ✅ Agregar taxCondition para compatibilidad
+      const customerForUI: Customer = {
         ...createdCustomer,
-        taxCondition: mapTaxConditionFromAPI(createdCustomer.taxStatus)
+        taxCondition: createdCustomer.taxStatus // Compatibilidad
       }
       
       // Actualizar la lista de clientes
@@ -150,10 +256,15 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
       // Resetear formulario
       setIsAddingNew(false)
       setNewCustomer({
-        documentType: "DNI",
-        taxStatus: "Consumidor Final",
+        documentType: "DNI" as DocumentTypeUI,
+        taxStatus: "CONSUMIDOR_FINAL" as TaxConditionUI,
       })
       setOpen(false)
+      
+      toast({
+        title: "Cliente creado",
+        description: `${createdCustomer.name} ha sido agregado correctamente`,
+      })
     } catch (error) {
       setError("Error al crear cliente")
       toast({
@@ -196,7 +307,18 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
                   className="pl-8"
                 />
               </div>
-              <Button variant="outline" onClick={() => setIsAddingNew(true)}>
+              <Button variant="outline" onClick={() => {
+                setIsAddingNew(true);
+                // ✅ Reset formulario con valores válidos por defecto
+                setNewCustomer({
+                  documentType: "DNI" as DocumentTypeUI,
+                  taxStatus: "CONSUMIDOR_FINAL" as TaxConditionUI,
+                  documentNumber: "",
+                  name: "",
+                  email: "",
+                  phone: "",
+                });
+              }}>
                 <Plus className="h-4 w-4 mr-2" />
                 Nuevo
               </Button>
@@ -226,7 +348,7 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
                         )}
                       </div>
                       <Badge>
-                        {mapTaxConditionFromAPI(customer.taxStatus)}
+                        {TAX_CONDITION_LABELS[customer.taxStatus] || customer.taxStatus}
                       </Badge>
                     </div>
                   ))}
@@ -240,6 +362,14 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
           </>
         ) : (
           <div className="space-y-4">
+            {/* ✅ Información de ayuda */}
+            <div className="p-3 bg-blue-50 border border-blue-200 rounded-md">
+              <p className="text-sm text-blue-800">
+                <strong>💡 Ayuda:</strong> Ingrese el CUIT/CUIL en el primer campo y presione el botón de búsqueda 
+                para autocompletar los datos. Para CUIT `30-71234567-8` hay datos de prueba disponibles.
+              </p>
+            </div>
+            
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-2">
                 <Label htmlFor="taxId">CUIT/CUIL</Label>
@@ -247,7 +377,7 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
                   <Input
                     id="taxId"
                     value={newCustomer.taxId || ""}
-                    onChange={(e) => setNewCustomer({ ...newCustomer, taxId: e.target.value })}
+                    onChange={(e) => handleTaxIdChange(e.target.value)}
                     placeholder="XX-XXXXXXXX-X"
                   />
                   <Button variant="outline" size="icon" onClick={fetchTaxData}>
@@ -261,12 +391,13 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
                   id="taxCondition"
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   value={newCustomer.taxStatus}
-                  onChange={(e) => setNewCustomer({ ...newCustomer, taxStatus: e.target.value })}
+                  onChange={(e) => setNewCustomer({ ...newCustomer, taxStatus: e.target.value as TaxConditionUI })}
                 >
-                  <option value="Responsable Inscripto">Responsable Inscripto</option>
-                  <option value="Monotributista">Monotributista</option>
-                  <option value="Exento">Exento</option>
-                  <option value="Consumidor Final">Consumidor Final</option>
+                  {TAX_CONDITION_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </div>
             </div>
@@ -287,20 +418,34 @@ export function CustomerSelector({ onSelectCustomer, selectedCustomer }: Custome
                   id="documentType"
                   className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background file:border-0 file:bg-transparent file:text-sm file:font-medium placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
                   value={newCustomer.documentType}
-                  onChange={(e) => setNewCustomer({ ...newCustomer, documentType: e.target.value })}
+                  onChange={(e) => handleDocumentTypeChange(e.target.value as DocumentTypeUI)}
                 >
-                  <option value="DNI">DNI</option>
-                  <option value="CUIT">CUIT</option>
-                  <option value="CUIL">CUIL</option>
-                  <option value="Pasaporte">Pasaporte</option>
+                  {POS_DOCUMENT_TYPE_OPTIONS.map(option => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
                 </select>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="documentNumber">Número de Documento</Label>
+                <Label htmlFor="documentNumber">
+                  Número de Documento
+                  {(newCustomer.documentType === "CUIT" || newCustomer.documentType === "CUIL") && (
+                    <span className="text-xs text-muted-foreground ml-1">
+                      (se sincroniza con CUIT/CUIL)
+                    </span>
+                  )}
+                </Label>
                 <Input
                   id="documentNumber"
                   value={newCustomer.documentNumber || ""}
                   onChange={(e) => setNewCustomer({ ...newCustomer, documentNumber: e.target.value })}
+                  placeholder={
+                    newCustomer.documentType === "DNI" ? "12.345.678" :
+                    newCustomer.documentType === "CUIT" ? "30-12345678-9" :
+                    newCustomer.documentType === "CUIL" ? "20-12345678-9" :
+                    "Número de documento"
+                  }
                 />
               </div>
             </div>

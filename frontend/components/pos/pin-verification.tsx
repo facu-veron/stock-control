@@ -49,14 +49,25 @@ export function PinVerification({
     setIsVerifying(true)
 
     try {
-      const employee = await verifyPin(pin)
-      if (employee) {
+      console.log("🔍 Verificando PIN:", pin);
+      const employee = await verifyPin(pin);
+      console.log("✅ Employee verificado:", employee);
+      console.log("🔍 Employee type:", typeof employee);
+      console.log("🔍 Employee ID:", employee?.id);
+      console.log("🔍 Employee Name:", employee?.name);
+      console.log("🔍 Employee truthy check:", !!employee);
+      console.log("🔍 Employee.id truthy check:", !!employee?.id);
+      
+      if (employee && employee.id) {
+        console.log("✅ Pasando employee a onEmployeeVerified:", employee);
         onEmployeeVerified(employee)
         toast({
           title: "PIN verificado",
           description: `Empleado: ${employee.name}`,
         })
       } else {
+        console.error("❌ Employee inválido:", employee);
+        console.error("❌ Employee falsy reason:", !employee ? "employee is falsy" : "employee.id is falsy");
         toast({
           title: "PIN incorrecto",
           description: "Verifica tu PIN e intenta nuevamente",
@@ -65,9 +76,10 @@ export function PinVerification({
         setPin("")
       }
     } catch (error) {
+      console.error("🚨 Error en pin verification:", error);
       toast({
         title: "Error de verificación",
-        description: "No se pudo verificar el PIN",
+        description: error instanceof Error ? error.message : "No se pudo verificar el PIN",
         variant: "destructive",
       })
       setPin("")

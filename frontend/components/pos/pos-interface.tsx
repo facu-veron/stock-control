@@ -8,7 +8,8 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { toast } from "@/components/ui/use-toast"
 import { ProductSelector } from "@/components/pos/product-selector"
-import { CustomerSelector } from "@/components/pos/customer-selector"
+// import { CustomerSelector } from "@/components/pos/customer-selector" // ✅ Reemplazado por formulario nuevo
+import { ClienteSelectorCompleto } from "@/components/pos/cliente-selector-completo"
 import { CartSummary } from "@/components/pos/cart-summary"
 import { PreInvoice } from "@/components/pos/pre-invoice"
 import { InvoiceProcessing } from "@/components/pos/invoice-processing"
@@ -20,41 +21,30 @@ import { Badge } from "@/components/ui/badge"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
 import { Receipt, FileText, User, LogOut, ShoppingCart, Package, Clock } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
-import type { User as Employee, Customer } from "@/lib/api"
+import type { User as Employee, Customer, CreateSaleRequest } from "@/lib/api"
 import { createSale } from "@/lib/api"
+import { 
+  type InvoiceTypeUI, 
+  type TaxConditionUI,
+  type StandardizedCartItem,
+  type StandardizedInvoiceData,
+  determineInvoiceTypeForCustomer,
+  validateInvoiceTypeForCustomer,
+  TAX_CONDITION_LABELS,
+  convertLegacyTaxStatus,
+} from "@/lib/afip-types"
+import { 
+  useErrorHandler, 
+  validateSaleData,
+  VALIDATION_ERRORS 
+} from "@/lib/error-handler"
 
-// Tipos
-export type CartItem = {
-  id: string
-  name: string
-  price: number
-  quantity: number
-  tax: number
-  taxRate: number
-  discount: number
-  total: number
-  category?: string
-}
+// ✅ Tipos actualizados
+export type CartItem = StandardizedCartItem
 
-export type InvoiceType = "A" | "B" | "C" | "TICKET"
+export type InvoiceType = InvoiceTypeUI
 
-export type InvoiceData = {
-  id: string
-  number: string
-  type: InvoiceType
-  date: Date
-  customer: Customer | null
-  employee: Employee
-  items: CartItem[]
-  subtotal: number
-  tax: number
-  total: number
-  discount?: number
-  paymentMethod?: "efectivo" | "tarjeta" | "transferencia"
-  cae?: string
-  caeExpirationDate?: Date
-  status?: "pending" | "completed" | "error"
-}
+export type InvoiceData = StandardizedInvoiceData
 
 // Estados del proceso de facturación
 type PosState = "cart" | "pre-invoice" | "pin-verification" | "processing" | "success" | "error"
@@ -62,6 +52,7 @@ type PosState = "cart" | "pre-invoice" | "pin-verification" | "processing" | "su
 export function PosInterface() {
   const router = useRouter()
   const { user, logout } = useAuthStore()
+  const { handleError } = useErrorHandler() // ✅ Usar el hook de manejo de errores
   const [state, setState] = React.useState<PosState>("cart")
   const [cart, setCart] = React.useState<CartItem[]>([])
   const [customer, setCustomer] = React.useState<Customer | null>(null)
@@ -73,6 +64,8 @@ export function PosInterface() {
   const [errorMessage, setErrorMessage] = React.useState<string>("")
   const [saleEmployee, setSaleEmployee] = React.useState<Employee | null>(null)
 
+  // ✅ Funciones de mapeo movidas al componente ClienteSelectorCompleto
+
   // Calcular totales del carrito (siempre en pesos)
   const cartTotals = React.useMemo(() => {
     const subtotal = cart.reduce((sum, item) => sum + item.price * item.quantity, 0)
@@ -82,21 +75,29 @@ export function PosInterface() {
     return { subtotal, tax, total }
   }, [cart, discount])
 
-  // Determinar tipo de documento basado en la selección y cliente
+  // ✅ Determinar tipo de documento basado en la selección y cliente usando tipos estandarizados
   React.useEffect(() => {
     if (documentType === "ticket") {
       setInvoiceType("TICKET")
       setCustomer(null) // Los tickets no requieren cliente
     } else if (customer) {
-      if (customer.taxStatus === "Responsable Inscripto") {
-        setInvoiceType("A")
-      } else if (customer.taxStatus === "Monotributista" || customer.taxStatus === "Exento") {
-        setInvoiceType("B")
-      } else if (customer.taxStatus === "Consumidor Final") {
-        setInvoiceType("B")
+      // ✅ Convertir taxStatus legacy si es necesario
+      const standardizedTaxStatus = typeof customer.taxStatus === 'string' 
+        ? convertLegacyTaxStatus(customer.taxStatus) || customer.taxStatus as TaxConditionUI
+        : customer.taxStatus;
+        
+      // ✅ Usar función estandarizada para determinar tipo de factura
+      const suggestedType = determineInvoiceTypeForCustomer(standardizedTaxStatus);
+      setInvoiceType(suggestedType);
+      
+      // ✅ Validar compatibilidad
+      const validation = validateInvoiceTypeForCustomer(suggestedType, standardizedTaxStatus);
+      if (!validation.valid) {
+        console.warn("Tipo de factura no compatible:", validation.error);
+        setInvoiceType("FACTURA_B"); // Fallback seguro
       }
     } else {
-      setInvoiceType("B")
+      setInvoiceType("FACTURA_B")
     }
   }, [customer, documentType])
 
@@ -188,24 +189,47 @@ export function PosInterface() {
     setCart(updatedCart)
   }
 
-  // Continuar a pre-factura
+  // ✅ Continuar a pre-factura con validaciones mejoradas
   const proceedToPreInvoice = () => {
-    if (cart.length === 0) {
+    // ✅ Validar datos de la venta
+    const validation = validateSaleData({
+      items: cart,
+      customer: customer || undefined,
+      invoiceType: documentType === "ticket" ? "TICKET" : invoiceType,
+      puntoVenta: documentType === "factura" ? 1 : undefined,
+    });
+
+    if (validation) {
       toast({
-        title: "Carrito vacío",
-        description: "Agregue productos al carrito para continuar",
+        title: "Error de validación",
+        description: validation.userMessage,
         variant: "destructive",
       })
       return
     }
 
-    if (documentType === "factura" && !customer) {
-      toast({
-        title: "Cliente no seleccionado",
-        description: "Seleccione un cliente para emitir una factura",
-        variant: "destructive",
-      })
-      return
+    // ✅ Validación adicional específica para facturas
+    if (documentType === "factura") {
+      if (!customer) {
+        const error = VALIDATION_ERRORS.CUSTOMER_REQUIRED;
+        toast({
+          title: "Cliente requerido",
+          description: error.userMessage,
+          variant: "destructive",
+        })
+        return
+      }
+
+      // Validar compatibilidad del tipo de factura
+      const compatibility = validateInvoiceTypeForCustomer(invoiceType, customer.taxStatus);
+      if (!compatibility.valid) {
+        toast({
+          title: "Tipo de factura incompatible",
+          description: compatibility.error,
+          variant: "destructive",
+        })
+        return
+      }
     }
 
     setState("pre-invoice")
@@ -223,54 +247,150 @@ export function PosInterface() {
     confirmInvoice(employee)
   }
 
-  // Confirmar factura/ticket
+  // ✅ Confirmar factura/ticket con tipos estandarizados
   const confirmInvoice = async (employee: Employee) => {
     setState("processing")
     try {
-      const salePayload = {
+      console.log("🔄 Iniciando confirmInvoice con:", {
+        employee,
+        cart: cart.length,
+        customer,
+        invoiceType,
+        documentType,
+        cartTotals,
+      });
+
+      // ✅ Validaciones básicas
+      if (!employee?.id) {
+        throw new Error("Employee ID requerido");
+      }
+
+      if (!cart || cart.length === 0) {
+        throw new Error("Carrito vacío - agregue productos");
+      }
+
+      // ✅ Validar antes de enviar
+      if (documentType === "factura" && customer) {
+        const validation = validateInvoiceTypeForCustomer(invoiceType, customer.taxStatus);
+        if (!validation.valid) {
+          throw new Error(validation.error);
+        }
+      }
+
+      console.log("✅ Validaciones pasadas, creando payload...");
+
+      const salePayload: CreateSaleRequest = {
         employeeId: employee.id,
         customerId: customer?.id,
+        customer: customer ? {
+          name: customer.name,
+          documentType: customer.documentType,
+          documentNumber: customer.documentNumber,
+          taxStatus: customer.taxStatus,
+          email: customer.email,
+          address: customer.address,
+          taxId: customer.taxId,
+        } : undefined,
         items: cart.map(item => ({
           productId: item.id,
           quantity: item.quantity,
           unitPrice: item.price,
           discount: item.discount || 0,
         })),
-        invoiceType: invoiceType === "TICKET" ? "TICKET" : `FACTURA_${invoiceType}`,
-        notes: undefined, // Puedes agregar notas si lo deseas
+        invoiceType: invoiceType, // ✅ Usar directamente el tipo tipado
+        puntoVenta: documentType === "factura" ? 1 : undefined, // ✅ Agregar punto de venta para facturas
+        notes: undefined,
         discount: discount > 0 ? discount : undefined,
       }
-      const sale = await createSale(salePayload)
+
+      // ✅ Validar que el customer tenga ID válido
+      if (customer && !customer.id) {
+        throw new Error("El cliente seleccionado no tiene ID válido. Crea un nuevo cliente.");
+      }
+      
+      console.log("📤 Enviando payload a createSale:", salePayload);
+      
+      const response = await createSale(salePayload)
+      
+      console.log("📥 Respuesta de createSale:", response);
+
+      if (!response) {
+        throw new Error("No se recibió respuesta del servidor");
+      }
+
+      // ✅ Extraer datos de la respuesta correcta del backend
+      const sale = response.sale;
+      const afipData = response.afip;
+
+      if (!sale || !sale.id) {
+        throw new Error("Respuesta inválida del servidor - falta datos de venta");
+      }
+
+      console.log("✅ Datos de venta:", sale);
+      console.log("✅ Datos AFIP:", afipData);
+
+      console.log("🔍 Procesando items de la venta:", sale.items);
+
+      const processedItems = (sale.items || []).map((item: any, index: number) => {
+        console.log(`🔍 Procesando item ${index}:`, item);
+        
+        return {
+          id: item.productId || item.id || `item-${index}`,
+          name: item.product?.name || item.productName || `Producto ${index + 1}`,
+          price: Number(item.unitPrice || item.price || 0),
+          quantity: Number(item.quantity || 1),
+          tax: Number(item.tax || 0),
+          taxRate: Number(item.ivaRate || item.taxRate || 0),
+          discount: Number(item.discount || 0),
+          total: Number(item.lineTotal || item.total || 0),
+          category: item.product?.category?.name || item.category,
+        };
+      });
+
+      console.log("✅ Items procesados:", processedItems);
+
       setInvoiceData({
         id: sale.id,
-        number: sale.saleNumber || sale.id,
+        number: sale.saleNumber || sale.cbteNro || afipData?.numero || sale.id,
         type: invoiceType,
-        date: new Date(sale.createdAt),
-        customer: sale.customer || customer,
-        employee: sale.employee || employee,
-        items: sale.items.map((item: any) => ({
-          id: item.productId,
-          name: item.product?.name || "",
-          price: item.unitPrice,
-          quantity: item.quantity,
-          tax: item.tax || 0,
-          taxRate: item.ivaRate || 0,
-          discount: item.discount || 0,
-          total: item.lineTotal || 0,
-          category: item.product?.category?.name,
-        })),
-        subtotal: sale.subtotal,
-        tax: sale.taxTotal,
-        total: sale.grandTotal,
+        date: new Date(sale.createdAt || Date.now()),
+        customer: sale.customer || (customer ? {
+          ...customer,
+          taxCondition: customer.taxCondition || customer.taxStatus
+        } : null),
+        employee: sale.employee || saleEmployee,
+        items: processedItems,
+        subtotal: Number(sale.subtotal || 0),
+        tax: Number(sale.taxTotal || 0),
+        total: Number(sale.grandTotal || 0),
         discount: discount,
         paymentMethod: paymentMethod,
-        cae: sale.cae,
-        caeExpirationDate: sale.caeVencimiento ? new Date(sale.caeVencimiento) : undefined,
-        status: sale.status,
+        cae: sale.cae || afipData?.cae, // ✅ Usar CAE de AFIP si está disponible
+        caeExpirationDate: sale.caeVto ? new Date(sale.caeVto) : (afipData?.vencimiento ? new Date(afipData.vencimiento) : undefined),
+        status: sale.status || "completed",
       })
       setState("success")
     } catch (error: any) {
-      setErrorMessage(error.message || "Error al generar la factura")
+      console.error("🚨 Error original en confirmInvoice:", error);
+      console.error("🚨 Stack trace:", error?.stack);
+      console.error("🚨 Error message:", error?.message);
+      console.error("🚨 Error type:", typeof error);
+      
+      try {
+        // ✅ Usar el manejador de errores centralizado
+        const { error: parsedError, recovery } = handleError(error);
+        setErrorMessage(parsedError.userMessage);
+        
+        console.log("✅ Error parseado:", {
+          originalError: error,
+          parsedError,
+          recovery,
+        });
+      } catch (handlerError) {
+        console.error("🚨 Error en el handler de errores:", handlerError);
+        setErrorMessage(error?.message || "Error desconocido al procesar la venta");
+      }
+      
       setState("error")
     }
   }
@@ -298,7 +418,10 @@ export function PosInterface() {
           .padStart(8, "0")}`,
         type: invoiceType,
         date: now,
-        customer: customer,
+        customer: customer ? {
+          ...customer,
+          taxCondition: customer.taxCondition || customer.taxStatus
+        } : null,
         employee: saleEmployee,
         items: cart,
         subtotal: cartTotals.subtotal,
@@ -484,7 +607,10 @@ export function PosInterface() {
                   </ToggleGroup>
 
                   {documentType === "factura" && (
-                    <CustomerSelector onSelectCustomer={setCustomer} selectedCustomer={customer} />
+                    <ClienteSelectorCompleto
+                      onClienteSeleccionado={setCustomer}
+                      clienteSeleccionado={customer}
+                    />
                   )}
                 </div>
 

@@ -19,6 +19,7 @@ import {
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Minus, Plus, Trash2, Percent, DollarSign, CreditCard, Banknote } from "lucide-react"
 import type { CartItem } from "@/components/pos/pos-interface"
+import { validateDocumentNumber } from "@/lib/afip-types"
 
 interface CartSummaryProps {
   items: CartItem[]
@@ -51,21 +52,21 @@ export function CartSummary({
   const [tempDiscount, setTempDiscount] = React.useState(discount)
   const [discountType, setDiscountType] = React.useState<"percentage" | "amount">("percentage")
 
-  // Calcular totales con descuento
-  const subtotalWithDiscount = totals.subtotal - discount
-  const finalTotal = Math.max(0, subtotalWithDiscount + totals.tax)
+  // ✅ Calcular totales con descuento corrigiendo la lógica
+  const subtotalWithDiscount = Math.max(0, totals.subtotal - discount)
+  const finalTotal = subtotalWithDiscount + totals.tax
 
   const handleApplyDiscount = () => {
     if (onDiscountChange) {
       let finalDiscount = tempDiscount
 
       if (discountType === "percentage") {
-        // Convertir porcentaje a monto
+        // ✅ Convertir porcentaje a monto
         finalDiscount = (totals.subtotal * tempDiscount) / 100
       }
 
-      // Validar que el descuento no sea mayor al subtotal
-      finalDiscount = Math.min(finalDiscount, totals.subtotal)
+      // ✅ Validar que el descuento no sea mayor al subtotal
+      finalDiscount = Math.min(Math.max(0, finalDiscount), totals.subtotal)
 
       onDiscountChange(finalDiscount)
     }
