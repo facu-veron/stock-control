@@ -37,6 +37,8 @@ interface ProductsActions {
   createProduct: (data: CreateProductRequest) => Promise<void>
   updateProduct: (id: string, data: UpdateProductRequest) => Promise<void>
   deleteProduct: (id: string) => Promise<void>
+  deactivateProduct: (id: string) => Promise<void>
+  reactivateProduct: (id: string) => Promise<void>
   clearError: () => void
 }
 
@@ -160,6 +162,68 @@ export const useProductsStore = create<ProductsStore>()(
           set({ error: errorMessage, isLoading: false })
           toast({
             title: "Error al eliminar",
+            description: errorMessage,
+            variant: "destructive",
+          })
+          throw error
+        }
+      },
+
+      deactivateProduct: async (id) => {
+        set({ isLoading: true, error: null })
+        try {
+          // Find the product first
+          const product = get().products.find(p => p.id === id)
+          if (!product) {
+            throw new Error("Producto no encontrado")
+          }
+
+          // Update the product to set active = false
+          const updatedProduct = await updateProduct(id, { ...product, active: false })
+          set((state) => ({
+            products: state.products.map((p) => (p.id === id ? updatedProduct : p)),
+            isLoading: false,
+          }))
+          toast({
+            title: "Producto desactivado",
+            description: `El producto "${updatedProduct.name}" ha sido desactivado correctamente.`,
+          })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Error al desactivar producto"
+          set({ error: errorMessage, isLoading: false })
+          toast({
+            title: "Error al desactivar",
+            description: errorMessage,
+            variant: "destructive",
+          })
+          throw error
+        }
+      },
+
+      reactivateProduct: async (id) => {
+        set({ isLoading: true, error: null })
+        try {
+          // Find the product first
+          const product = get().products.find(p => p.id === id)
+          if (!product) {
+            throw new Error("Producto no encontrado")
+          }
+
+          // Update the product to set active = true
+          const updatedProduct = await updateProduct(id, { ...product, active: true })
+          set((state) => ({
+            products: state.products.map((p) => (p.id === id ? updatedProduct : p)),
+            isLoading: false,
+          }))
+          toast({
+            title: "Producto reactivado",
+            description: `El producto "${updatedProduct.name}" ha sido reactivado correctamente.`,
+          })
+        } catch (error) {
+          const errorMessage = error instanceof Error ? error.message : "Error al reactivar producto"
+          set({ error: errorMessage, isLoading: false })
+          toast({
+            title: "Error al reactivar",
             description: errorMessage,
             variant: "destructive",
           })

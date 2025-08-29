@@ -45,6 +45,7 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
     material: initialData?.material || "",
     brand: initialData?.brand || "",
     unit: initialData?.unit || "unidad",
+    active: initialData?.active !== undefined ? initialData.active.toString() : "true",
   })
 
   const [errors, setErrors] = React.useState<Record<string, string>>({})
@@ -128,7 +129,7 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
       newErrors.minStock = "El stock mínimo no puede ser negativo"
     }
 
-    if (!formData.categoryId) {
+    if (!formData.categoryId || formData.categoryId === "loading" || formData.categoryId === "empty") {
       newErrors.categoryId = "Seleccione una categoría"
     }
 
@@ -193,7 +194,8 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
         unit: formData.unit,
         ivaRate: Number.parseFloat(formData.ivaRate),
         categoryId: formData.categoryId,
-        supplierId: formData.supplierId || undefined,
+        supplierId: formData.supplierId && formData.supplierId !== "loading" && formData.supplierId !== "empty" ? formData.supplierId : undefined,
+        active: formData.active === "true",
       }
 
       if (isEditing && initialData?.id) {
@@ -230,6 +232,7 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
           material: "",
           brand: "",
           unit: "unidad",
+          active: "true",
         })
       }
     } catch (error) {
@@ -321,11 +324,11 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
                 </SelectTrigger>
                 <SelectContent>
                   {categoriesLoading ? (
-                    <SelectItem value="" disabled>
+                    <SelectItem value="loading" disabled>
                       Cargando categorías...
                     </SelectItem>
                   ) : categories.length === 0 ? (
-                    <SelectItem value="" disabled>
+                    <SelectItem value="empty" disabled>
                       No hay categorías disponibles
                     </SelectItem>
                   ) : (
@@ -358,11 +361,11 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
                 </SelectTrigger>
                 <SelectContent>
                   {suppliersLoading ? (
-                    <SelectItem value="" disabled>
+                    <SelectItem value="loading" disabled>
                       Cargando proveedores...
                     </SelectItem>
                   ) : suppliers.length === 0 ? (
-                    <SelectItem value="" disabled>
+                    <SelectItem value="empty" disabled>
                       No hay proveedores disponibles
                     </SelectItem>
                   ) : (
@@ -447,6 +450,19 @@ export function ProductForm({ onSubmit, initialData, isEditing = false }: Produc
                       {material}
                     </SelectItem>
                   ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="active">Estado del Producto</Label>
+              <Select value={formData.active} onValueChange={(value) => handleInputChange("active", value)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="true">Activo</SelectItem>
+                  <SelectItem value="false">Inactivo</SelectItem>
                 </SelectContent>
               </Select>
             </div>

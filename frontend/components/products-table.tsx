@@ -54,7 +54,7 @@ interface ProductsTableProps {
 }
 
 export function ProductsTable({ onEdit, onDelete, onView }: ProductsTableProps) {
-  const { products, isLoading, error, fetchProducts, deleteProduct } = useProductsStore()
+  const { products, isLoading, error, fetchProducts, deleteProduct, deactivateProduct, reactivateProduct } = useProductsStore()
   const [sorting, setSorting] = React.useState<SortingState>([])
   const [columnFilters, setColumnFilters] = React.useState<ColumnFiltersState>([])
   const [columnVisibility, setColumnVisibility] = React.useState<VisibilityState>({})
@@ -254,12 +254,48 @@ export function ProductsTable({ onEdit, onDelete, onView }: ProductsTableProps) 
               title: "Producto eliminado",
               description: `El producto "${product.name}" ha sido eliminado correctamente.`,
             })
+          } catch (err: any) {
+            // Handle specific error codes from the backend
+            if (err?.response?.data?.code === "PRODUCT_HAS_SALES" || err?.response?.data?.code === "FOREIGN_KEY_CONSTRAINT") {
+              toast({
+                title: "No se puede eliminar",
+                description: err.response.data.error || "El producto ha sido utilizado en ventas y no puede eliminarse.",
+                variant: "destructive",
+                action: (
+                  <Button 
+                    variant="outline" 
+                    size="sm"
+                    onClick={() => handleDeactivate()}
+                  >
+                    Desactivar
+                  </Button>
+                ),
+              })
+            } else {
+              toast({
+                title: "Error al eliminar",
+                description: `No se pudo eliminar el producto. ${err instanceof Error ? err.message : ""}`,
+                variant: "destructive",
+              })
+            }
+          }
+        }
+
+        const handleDeactivate = async () => {
+          try {
+            await deactivateProduct(product.id)
           } catch (err) {
-            toast({
-              title: "Error al eliminar",
-              description: `No se pudo eliminar el producto. ${err instanceof Error ? err.message : ""}`,
-              variant: "destructive",
-            })
+            // Error handling is already done in the store
+            console.error("Error deactivating product:", err)
+          }
+        }
+
+        const handleReactivate = async () => {
+          try {
+            await reactivateProduct(product.id)
+          } catch (err) {
+            // Error handling is already done in the store
+            console.error("Error reactivating product:", err)
           }
         }
 
@@ -283,6 +319,12 @@ export function ProductsTable({ onEdit, onDelete, onView }: ProductsTableProps) 
                 <Edit className="mr-2 h-4 w-4" />
                 Editar
               </DropdownMenuItem>
+              {!product.active && (
+                <DropdownMenuItem onClick={() => handleReactivate()}>
+                  <Edit className="mr-2 h-4 w-4" />
+                  Reactivar
+                </DropdownMenuItem>
+              )}
               <AlertDialog>
                 <AlertDialogTrigger asChild>
                   <DropdownMenuItem onSelect={(e) => e.preventDefault()} className="text-red-600">

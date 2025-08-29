@@ -120,6 +120,7 @@ export interface CreateProductRequest {
   categoryId: string
   supplierId?: string
   tagIds?: string[]
+  active?: boolean
 }
 
 export interface UpdateProductRequest extends Partial<CreateProductRequest> {}

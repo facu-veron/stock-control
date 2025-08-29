@@ -1,5 +1,6 @@
 "use client"
 
+import { useRouter } from "next/navigation"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { MainNav } from "@/components/main-nav"
@@ -10,8 +11,20 @@ import { DataTableFacetedFilter } from "@/components/data-table-faceted-filter"
 import { RoleGuard } from "@/components/auth/role-guard"
 import Link from "next/link"
 import { Plus } from "lucide-react"
+import type { Product } from "@/lib/api"
 
 export default function ProductosPage() {
+  const router = useRouter()
+
+  const handleEdit = (product: Product) => {
+    router.push(`/productos/${product.id}`)
+  }
+
+  const handleView = (product: Product) => {
+    // For now, redirect to edit. You can create a view-only page later if needed
+    router.push(`/productos/${product.id}`)
+  }
+
   return (
     <RoleGuard allowedRoles={["admin"]} fallbackMessage="Solo los administradores pueden gestionar artículos">
       <div className="flex min-h-screen flex-col">
@@ -43,7 +56,10 @@ export default function ProductosPage() {
                 <DataTableFacetedFilter />
               </div>
             </div>
-            <ProductsTable />
+            <ProductsTable 
+              onEdit={handleEdit}
+              onView={handleView}
+            />
           </div>
         </div>
       </div>

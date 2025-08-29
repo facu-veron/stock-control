@@ -7,37 +7,49 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { toast } from "@/components/ui/use-toast"
 import { User, Lock, Users, Shield } from "lucide-react"
-import type { Employee } from "@/components/pos/pos-interface"
+import type { User as Employee } from "@/lib/api"
 
 // Empleados de ejemplo
 const sampleEmployees: Employee[] = [
   {
     id: "1",
+    email: "ana.garcia@empresa.com",
     name: "Ana García",
     pin: "1234",
-    role: "admin",
-    isActive: true,
+    role: "ADMIN",
+    active: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "2",
+    email: "carlos.lopez@empresa.com",
     name: "Carlos López",
     pin: "5678",
-    role: "employee",
-    isActive: true,
+    role: "EMPLOYEE",
+    active: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "3",
+    email: "maria.rodriguez@empresa.com",
     name: "María Rodríguez",
     pin: "9999",
-    role: "employee",
-    isActive: true,
+    role: "EMPLOYEE",
+    active: true,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
   {
     id: "4",
+    email: "juan.perez@empresa.com",
     name: "Juan Pérez",
     pin: "0000",
-    role: "admin",
-    isActive: false,
+    role: "ADMIN",
+    active: false,
+    createdAt: "2024-01-01T00:00:00Z",
+    updatedAt: "2024-01-01T00:00:00Z",
   },
 ]
 
@@ -50,7 +62,7 @@ export function EmployeeLogin({ onLogin }: EmployeeLoginProps) {
   const [selectedEmployee, setSelectedEmployee] = React.useState<Employee | null>(null)
   const [isLoading, setIsLoading] = React.useState(false)
 
-  const activeEmployees = sampleEmployees.filter((emp) => emp.isActive)
+  const activeEmployees = sampleEmployees.filter((emp) => emp.active)
 
   const handleEmployeeSelect = (employee: Employee) => {
     setSelectedEmployee(employee)
@@ -152,8 +164,8 @@ export function EmployeeLogin({ onLogin }: EmployeeLoginProps) {
                         <div className="text-sm text-muted-foreground">ID: {employee.id}</div>
                       </div>
                     </div>
-                    <Badge variant={employee.role === "admin" ? "default" : "secondary"}>
-                      {employee.role === "admin" ? (
+                    <Badge variant={employee.role === "ADMIN" ? "default" : "secondary"}>
+                      {employee.role === "ADMIN" ? (
                         <>
                           <Shield className="h-3 w-3 mr-1" />
                           Admin
