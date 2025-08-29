@@ -12,6 +12,7 @@ import { Search, Plus, User, FileText, UserRound } from "lucide-react"
 import { AgregarClienteMejorado } from "./agregar-cliente-mejorado"
 import { getCustomers, type Customer } from "@/lib/api"
 import { type Cliente } from "@/lib/afip-client-types"
+import { type TaxConditionUI } from "@/lib/afip-types"
 
 interface ClienteSelectorCompletoProps {
   onClienteSeleccionado: (cliente: Customer) => void;
@@ -90,8 +91,8 @@ export function ClienteSelectorCompleto({ onClienteSeleccionado, clienteSeleccio
   };
 
   // ✅ Mapeo de condición IVA
-  function mapearCondicionALegacy(condicion: string): string {
-    const mapeo: Record<string, string> = {
+  function mapearCondicionALegacy(condicion: string): TaxConditionUI {
+    const mapeo: Record<string, TaxConditionUI> = {
       'ResponsableInscripto': 'RESPONSABLE_INSCRIPTO',
       'Monotributista': 'MONOTRIBUTO',
       'ConsumidorFinal': 'CONSUMIDOR_FINAL',
@@ -103,7 +104,7 @@ export function ClienteSelectorCompleto({ onClienteSeleccionado, clienteSeleccio
       'MonotributistaSocial': 'MONOTRIBUTO_SOCIAL',
       'TrabajadorIndependiente': 'TRABAJADOR_INDEPENDIENTE_PROMOVIDO',
     };
-    return mapeo[condicion] || 'CONSUMIDOR_FINAL';
+    return mapeo[condicion] || 'CONSUMIDOR_FINAL' as TaxConditionUI;
   }
 
   const contenidoModal = modo === "crear" ? (
