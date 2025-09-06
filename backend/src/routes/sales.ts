@@ -4,91 +4,15 @@ import { prisma } from "../lib/prisma";
 import { body, validationResult } from "express-validator";
 import { authenticateToken } from "../middleware/auth";
 import type { AuthenticatedRequest } from "../types";
-import bcrypt from "bcryptjs";
 import { afipService } from "../services/afip.service";
+import bcrypt from 'bcryptjs';
 import { 
-  AFIP_INVOICE_TYPES,
   type InvoiceTypeUI,
-  type AfipInvoiceRequest,
   validateInvoiceTypeForCustomer,
   validateDocumentTypeForTaxCondition
 } from "../types/afip-types";
 
-
 const router = Router();
-
-/**
- * GET /api/sales
- * Obtiene todas las ventas del tenant
- */
-router.get("/", authenticateToken, async (req: AuthenticatedRequest, res) => {
-  try {
-    const tenantId = req.user!.tenantId;
-    const sales = await prisma.sale.findMany({
-      where: { tenantId },
-      include: {
-        items: {
-          include: {
-            product: true
-          }
-        },
-        customer: true,
-        employee: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }
-      },
-      orderBy: { createdAt: "desc" }
-    });
-
-    res.json({ success: true, data: sales });
-  } catch (error) {
-    console.error("Error al obtener ventas:", error);
-    res.status(500).json({ success: false, error: "Error interno al obtener ventas" });
-  }
-});
-
-/**
- * GET /api/sales/:id
- * Obtiene una venta específica por ID
- */
-router.get("/:id", authenticateToken, async (req: AuthenticatedRequest, res) => {
-  try {
-    const tenantId = req.user!.tenantId;
-    const { id } = req.params;
-
-    const sale = await prisma.sale.findFirst({
-      where: { id, tenantId },
-      include: {
-        items: {
-          include: {
-            product: true
-          }
-        },
-        customer: true,
-        employee: {
-          select: {
-            id: true,
-            name: true,
-            email: true
-          }
-        }
-      }
-    });
-
-    if (!sale) {
-      return res.status(404).json({ success: false, error: "Venta no encontrada" });
-    }
-
-    return res.json({ success: true, data: sale });
-  } catch (error) {
-    console.error("Error al obtener venta:", error);
-    return res.status(500).json({ success: false, error: "Error interno al obtener venta" });
-  }
-});
 
 /**
  * POST /api/sales/validate-pin
@@ -154,6 +78,7 @@ router.post(
   }
 );
 
+
 /**
  * POST /api/sales/create
  * Crea una nueva venta con facturación electrónica opcional
@@ -168,18 +93,11 @@ router.post(
     body("items.*.productId").isString().notEmpty(),
     body("items.*.quantity").isInt({ min: 1 }),
     body("items.*.unitPrice").isFloat({ min: 0 }),
-    body("invoiceType").optional().isIn(["TICKET", "FACTURA_A", "FACTURA_B", "FACTURA_C"]),
+    body("invoiceType").isIn(["TICKET", "FACTURA_A", "FACTURA_B", "FACTURA_C"]),
     body("puntoVenta").optional().isInt({ min: 1 }),
     body("customer").optional().isObject(),
-    body("customer.documentType").optional().isIn(["CUIT", "CUIL", "DNI", "CF", "PASSPORT"]),
-    body("customer.taxStatus").optional().isIn([
-      "RESPONSABLE_INSCRIPTO", "EXENTO", "CONSUMIDOR_FINAL", "MONOTRIBUTO", 
-      "NO_CATEGORIZADO", "PROVEEDOR_EXTERIOR", "CLIENTE_EXTERIOR",
-      "LIBERADO_LEY_19640", "MONOTRIBUTO_SOCIAL", "NO_ALCANZADO", 
-      "TRABAJADOR_INDEPENDIENTE_PROMOVIDO"
-    ])
   ],
-  async (req: AuthenticatedRequest, res:Response) => {
+  async (req: AuthenticatedRequest, res: Response) => {
     const errors = validationResult(req);
     if (!errors.isEmpty()) {
       return res.status(400).json({ 
@@ -200,9 +118,8 @@ router.post(
       customer: customerData
     } = req.body;
 
-    // ✅ VALIDACIONES CRÍTICAS DE COMPATIBILIDAD AFIP
+    // ✅ VALIDACIONES SIMPLIFICADAS
     if (invoiceType !== "TICKET") {
-      // Validar punto de venta para facturas
       if (!puntoVenta || puntoVenta < 1) {
         return res.status(400).json({ 
           success: false, 
@@ -210,19 +127,17 @@ router.post(
         });
       }
 
-      // Si hay datos de cliente inline, validar consistencia
+      // Validar compatibilidad si hay datos de cliente
       if (customerData) {
-        if (customerData.documentType && customerData.taxStatus) {
-          const docValidation = validateDocumentTypeForTaxCondition(
-            customerData.documentType, 
-            customerData.taxStatus
-          );
-          if (!docValidation.valid) {
-            return res.status(400).json({ 
-              success: false, 
-              error: `Error en datos del cliente: ${docValidation.error}` 
-            });
-          }
+        const docValidation = validateDocumentTypeForTaxCondition(
+          customerData.documentType, 
+          customerData.taxStatus
+        );
+        if (!docValidation.valid) {
+          return res.status(400).json({ 
+            success: false, 
+            error: docValidation.error 
+          });
         }
 
         const invoiceValidation = validateInvoiceTypeForCustomer(
@@ -232,14 +147,14 @@ router.post(
         if (!invoiceValidation.valid) {
           return res.status(400).json({ 
             success: false, 
-            error: `Error de compatibilidad: ${invoiceValidation.error}` 
+            error: invoiceValidation.error 
           });
         }
       }
     }
 
     try {
-      // Verificar que el empleado pertenece al tenant
+      // Verificar empleado
       const employee = await prisma.user.findFirst({
         where: { id: employeeId, tenantId, active: true }
       });
@@ -266,7 +181,7 @@ router.post(
         }
       }
 
-      // Crear la venta en una transacción
+      // Crear la venta
       const createdSale = await prisma.$transaction(async (tx) => {
         // Generar número de venta
         const lastSale = await tx.sale.findFirst({
@@ -293,7 +208,6 @@ router.post(
             throw new Error(`Producto ${item.productId} no encontrado`);
           }
 
-          // Verificar stock si se rastrea inventario
           if (product.trackInventory && product.stock < item.quantity) {
             throw new Error(`Stock insuficiente para ${product.name}`);
           }
@@ -324,21 +238,6 @@ router.post(
               where: { id: product.id },
               data: { stock: { decrement: item.quantity } }
             });
-
-            // Registrar movimiento de stock
-            await tx.stockMovement.create({
-              data: {
-                tenantId,
-                productId: product.id,
-                userId: employeeId,
-                type: "SALE",
-                quantity: -item.quantity,
-                stockBefore: product.stock,
-                stockAfter: product.stock - item.quantity,
-                reference: nextNumber,
-                reason: "Venta"
-              }
-            });
           }
         }
 
@@ -357,7 +256,7 @@ router.post(
             status: invoiceType === "TICKET" ? "CONFIRMED" : "DRAFT",
             paymentStatus: "PENDING",
             ptoVta: puntoVenta || 0,
-            cbteTipo: 0, // Se actualizará con AFIP
+            cbteTipo: invoiceType === "TICKET" ? 0 : 1, // 0 para ticket, 1 por defecto para facturas
             notes,
             items: {
               create: saleItems
@@ -371,11 +270,7 @@ router.post(
             },
             customer: true,
             employee: {
-              select: {
-                id: true,
-                name: true,
-                email: true
-              }
+              select: { id: true, name: true, email: true }
             }
           }
         });
@@ -383,10 +278,10 @@ router.post(
         return newSale;
       });
 
-      // Si es factura electrónica, procesarla con AFIP
+      // ✅ PROCESAR FACTURACIÓN CON AFIP (simplificado)
       if (invoiceType !== "TICKET" && puntoVenta) {
         try {
-          const comprobanteRespuesta = await afipService.procesarFacturacionFromSale({
+          const afipResponse = await afipService.procesarFacturacionFromSale({
             tenantId,
             sale: createdSale,
             tipoFactura: invoiceType as InvoiceTypeUI,
@@ -394,42 +289,26 @@ router.post(
             customer: customerData
           });
 
-          if (comprobanteRespuesta) {
-            // Obtener la venta actualizada con datos de AFIP
-            const updatedSale = await prisma.sale.findUnique({
-              where: { id: createdSale.id },
-              include: {
-                items: {
-                  include: {
-                    product: true
-                  }
-                },
-                customer: true,
-                employee: {
-                  select: {
-                    id: true,
-                    name: true,
-                    email: true
-                  }
-                }
-              }
-            });
+          // Obtener venta actualizada
+          const updatedSale = await prisma.sale.findUnique({
+            where: { id: createdSale.id },
+            include: {
+              items: { include: { product: true } },
+              customer: true,
+              employee: { select: { id: true, name: true, email: true } }
+            }
+          });
 
-            return res.json({
-              success: true,
-              message: "Venta creada y factura electrónica generada",
-              sale: updatedSale,
-              afip: {
-                cae: comprobanteRespuesta.cae,
-                vencimiento: comprobanteRespuesta.caeFchVto,
-                numero: comprobanteRespuesta.cbteNumero
-              }
-            });
-          }
+          return res.json({
+            success: true,
+            message: "Venta creada y factura electrónica generada",
+            sale: updatedSale,
+            afip: afipResponse
+          });
+
         } catch (afipError) {
-          console.error("❌ Error con AFIP, venta guardada como borrador:", afipError);
+          console.error("❌ Error con AFIP:", afipError);
           
-          // La venta ya está creada, solo informar del error con AFIP
           return res.json({
             success: true,
             warning: "Venta creada pero hubo un error con AFIP",
@@ -456,6 +335,136 @@ router.post(
 );
 
 /**
+ * GET /api/sales/afip/voucher-types
+ * Obtiene los tipos de comprobante desde AFIP
+ */
+router.get(
+  "/afip/voucher-types",
+  authenticateToken,
+  async (req: AuthenticatedRequest, res) => {
+    const tenantId = req.user!.tenantId;
+
+    try {
+      const voucherTypes = await afipService.getVoucherTypes(tenantId);
+      return res.json({
+        success: true,
+        voucherTypes
+      });
+    } catch (error) {
+      console.error("❌ Error obteniendo tipos de comprobante:", error);
+      return res.status(500).json({ 
+        success: false, 
+        error: "Error obteniendo tipos de comprobante desde AFIP" 
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/sales/afip/document-types
+ * Obtiene los tipos de documento desde AFIP
+ */
+router.get(
+  "/afip/document-types", 
+  authenticateToken,
+  async (req: AuthenticatedRequest, res) => {
+    const tenantId = req.user!.tenantId;
+
+    try {
+      const documentTypes = await afipService.getDocumentTypes(tenantId);
+      return res.json({
+        success: true,
+        documentTypes
+      });
+    } catch (error) {
+      console.error("❌ Error obteniendo tipos de documento:", error);
+      return res.status(500).json({ 
+        success: false, 
+        error: "Error obteniendo tipos de documento desde AFIP" 
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/sales/afip/aliquot-types
+ * Obtiene las alícuotas de IVA desde AFIP
+ */
+router.get(
+  "/afip/aliquot-types",
+  authenticateToken,
+  async (req: AuthenticatedRequest, res) => {
+    const tenantId = req.user!.tenantId;
+
+    try {
+      const aliquotTypes = await afipService.getAliquotTypes(tenantId);
+      return res.json({
+        success: true,
+        aliquotTypes
+      });
+    } catch (error) {
+      console.error("❌ Error obteniendo alícuotas de IVA:", error);
+      return res.status(500).json({ 
+        success: false, 
+        error: "Error obteniendo alícuotas de IVA desde AFIP" 
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/sales/afip/currency-types
+ * Obtiene los tipos de moneda desde AFIP
+ */
+router.get(
+  "/afip/currency-types",
+  authenticateToken,
+  async (req: AuthenticatedRequest, res) => {
+    const tenantId = req.user!.tenantId;
+
+    try {
+      const currencyTypes = await afipService.getCurrencyTypes(tenantId);
+      return res.json({
+        success: true,
+        currencyTypes
+      });
+    } catch (error) {
+      console.error("❌ Error obteniendo tipos de moneda:", error);
+      return res.status(500).json({ 
+        success: false, 
+        error: "Error obteniendo tipos de moneda desde AFIP" 
+      });
+    }
+  }
+);
+
+/**
+ * GET /api/sales/afip/server-status
+ * Verifica el estado del servidor de AFIP
+ */
+router.get(
+  "/afip/server-status",
+  authenticateToken,
+  async (req: AuthenticatedRequest, res) => {
+    const tenantId = req.user!.tenantId;
+
+    try {
+      const serverStatus = await afipService.getServerStatus(tenantId);
+      return res.json({
+        success: true,
+        serverStatus
+      });
+    } catch (error) {
+      console.error("❌ Error obteniendo estado del servidor:", error);
+      return res.status(500).json({ 
+        success: false, 
+        error: "Error obteniendo estado del servidor AFIP" 
+      });
+    }
+  }
+);
+
+/**
  * GET /api/sales/points-of-sale
  * Obtiene los puntos de venta habilitados en AFIP
  */
@@ -466,121 +475,17 @@ router.get(
     const tenantId = req.user!.tenantId;
 
     try {
-      // Obtener puntos de venta desde AFIP
-      const puntosVentaAfip = await afipService.getPointsOfSale(tenantId);
+      const pointsOfSale = await afipService.getPointsOfSale(tenantId);
       
-      // Obtener puntos de venta guardados en BD
-      const puntosVentaLocal = await prisma.afipPointOfSale.findMany({
-        where: { tenantId, active: true },
-        orderBy: { ptoVta: "asc" }
-      });
-
-      // Sincronizar con AFIP si es necesario
-      for (const pvAfip of puntosVentaAfip) {
-        const exists = puntosVentaLocal.find(pv => pv.ptoVta === pvAfip.Nro);
-        if (!exists) {
-          await prisma.afipPointOfSale.create({
-            data: {
-              tenantId,
-              ptoVta: pvAfip.Nro,
-              description: `Punto de Venta ${pvAfip.Nro}`,
-              active: pvAfip.Bloqueado === "N"
-            }
-          });
-        }
-      }
-
-      // Obtener lista actualizada
-      const puntosVenta = await prisma.afipPointOfSale.findMany({
-        where: { tenantId, active: true },
-        orderBy: { ptoVta: "asc" }
-      });
-
       return res.json({
         success: true,
-        pointsOfSale: puntosVenta
+        pointsOfSale
       });
     } catch (error) {
       console.error("❌ Error obteniendo puntos de venta:", error);
       return res.status(500).json({ 
         success: false, 
-        error: "Error obteniendo puntos de venta" 
-      });
-    }
-  }
-);
-
-/**
- * POST /api/sales/:id/retry-invoice
- * Reintenta generar la factura electrónica para una venta
- */
-router.post(
-  "/:id/retry-invoice",
-  authenticateToken,
-  [
-    body("invoiceType").isIn(["FACTURA_A", "FACTURA_B", "FACTURA_C"]),
-    body("puntoVenta").isInt({ min: 1 })
-  ],
-  async (req: AuthenticatedRequest, res: Response) => {
-    const { id } = req.params;
-    const { invoiceType, puntoVenta } = req.body;
-    const tenantId = req.user!.tenantId;
-
-    try {
-      // Verificar que la venta existe y pertenece al tenant
-      const sale = await prisma.sale.findFirst({
-        where: { 
-          id, 
-          tenantId,
-          cae: null // Solo reintentar si no tiene CAE
-        }
-      });
-
-      if (!sale) {
-        return res.status(404).json({ 
-          success: false, 
-          error: "Venta no encontrada o ya tiene factura" 
-        });
-      }
-
-      // Procesar facturación
-      const comprobanteRespuesta = await afipService.procesarFacturacionFromSale({
-        tenantId,
-        sale,
-        tipoFactura: invoiceType as InvoiceTypeUI,
-        puntoVenta
-      });
-
-      if (comprobanteRespuesta) {
-        const updatedSale = await prisma.sale.findUnique({
-          where: { id: sale.id },
-          include: {
-            items: true,
-            customer: true
-          }
-        });
-
-        return res.json({
-          success: true,
-          message: "Factura electrónica generada exitosamente",
-          sale: updatedSale,
-          afip: {
-            cae: comprobanteRespuesta.cae,
-            vencimiento: comprobanteRespuesta.caeFchVto
-          }
-        });
-      }
-
-      return res.status(500).json({ 
-        success: false, 
-        error: "No se pudo generar la factura electrónica" 
-      });
-
-    } catch (error) {
-      console.error("❌ Error reintentando factura:", error);
-      return res.status(500).json({ 
-        success: false, 
-        error: error instanceof Error ? error.message : "Error interno del servidor" 
+        error: "Error obteniendo puntos de venta desde AFIP" 
       });
     }
   }

@@ -29,6 +29,7 @@ import {
   mapearACondicionLegacy
 } from "@/lib/afip-client-types"
 import { createCustomer } from "@/lib/api"
+import type { DocumentTypeUI, TaxConditionUI } from "@/lib/afip-types"
 
 interface AgregarClienteMejoradoProps {
   onClienteCreado: (cliente: Cliente) => void;
@@ -200,8 +201,8 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
 
     try {
       // Mapear a formato legacy para compatibilidad con backend
-      const documentTypeMapped = mapearADocumentTypeUI(cliente.tipoDocumento!);
-      const taxStatusMapped = mapearACondicionLegacy(cliente.condicionIVA!);
+      const documentTypeMapped = mapearADocumentTypeUI(cliente.tipoDocumento!) as DocumentTypeUI;
+      const taxStatusMapped = mapearACondicionLegacy(cliente.condicionIVA!) as TaxConditionUI;
       
       console.log("🔍 Mapeo de tipos:", {
         tipoDocumento: cliente.tipoDocumento,
@@ -221,6 +222,9 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
 
       console.log("🔍 Enviando cliente al API:", clienteLegacy);
 
+      // ✅ ¡AQUÍ ESTABA EL PROBLEMA! Faltaba la llamada al API
+      const clienteCreado = await createCustomer(clienteLegacy);
+      console.log("✅ Cliente creado en BD:", clienteCreado);
       
       toast({
         title: "Cliente creado exitosamente",

@@ -1,4 +1,4 @@
-// src/services/afip.service.ts
+// src/services/afip.service.ts - VERSIÓN OPTIMIZADA
 import { Afip } from "afip.ts";
 import { prisma } from "../lib/prisma";
 import {
@@ -14,18 +14,12 @@ import {
   convertTaxConditionUIToAfip,
   convertDocumentTypeUIToAfip,
   convertInvoiceTypeUIToAfip,
-  validateInvoiceTypeForCustomer,
-  validateDocumentTypeForTaxCondition,
 } from "../types/afip-types";
-
-// ✅ TIPOS HEREDADOS (mantener compatibilidad temporal)
-export type CondicionIVAReceptorId = AfipTaxCondition;
-export type CustomerTaxStatus = TaxConditionUI;
 
 export interface AfipInvoiceData {
   ptoVta: number;
-  cbteTipo: AfipInvoiceType; // ✅ Usar códigos AFIP tipados
-  docTipo: AfipDocumentType; // ✅ Usar códigos AFIP tipados
+  cbteTipo: AfipInvoiceType;
+  docTipo: AfipDocumentType;
   docNro: number;
   impNeto: number;
   impIVA: number;
@@ -33,13 +27,9 @@ export interface AfipInvoiceData {
   impTotConc?: number;
   impOpEx?: number;
   impTrib?: number;
-
-  // ✅ NUEVO: permitir indicar concepto y condición IVA del receptor
-  concepto?: 1 | 2 | 3; // 1=Productos, 2=Servicios, 3=Ambos
-  condicionIVAReceptorId?: AfipTaxCondition; // ✅ override explícito tipado
-  taxStatus?: TaxConditionUI; // ✅ inferencia a partir de estado fiscal del cliente
-
-  // (solo uso informativo para tus propios registros)
+  concepto?: 1 | 2 | 3;
+  condicionIVAReceptorId?: AfipTaxCondition;
+  taxStatus?: TaxConditionUI;
   conceptoItems: Array<{
     qty: number;
     description: string;
@@ -55,187 +45,284 @@ export interface AfipInvoiceResponse {
   observaciones?: any[];
   errores?: any[];
 }
-export interface AfipResult {
-  cae: string;           // Sin ? si siempre debe estar presente
-  caeFchVto: string;     // Sin ? si siempre debe estar presente  
-  cbteNumero: number;    // Sin ? si siempre debe estar presente
-  resultado?: string;
-  observaciones?: any[];
-  errores?: any[];
-}
 
 export class AfipService {
-  private getAfipInstance(cuit: string, certPem: string, keyPem: string, isProduction = false): Afip {
-    const cuitNumber = parseInt(cuit.replace(/\D/g, ""), 10);
-    if (isNaN(cuitNumber)) {
-      throw new Error(`CUIT inválido: ${cuit}`);
+  private afipInstances: Map<string, Afip> = new Map();
+
+  /**
+   * Obtiene una instancia de AFIP para un tenant específico con cache
+   */
+  private async getAfipInstance(tenantId: string): Promise<Afip> {
+    if (this.afipInstances.has(tenantId)) {
+      return this.afipInstances.get(tenantId)!;
     }
-    return new Afip({
+
+    const credential = await prisma.afipCredential.findUnique({
+      where: { tenantId },
+      include: { tenant: true },
+    });
+
+    if (!credential || !credential.tenant) {
+      throw new Error("Credenciales AFIP no configuradas para este tenant");
+    }
+
+    const cuitNumber = parseInt(credential.tenant.cuit.replace(/\D/g, ""), 10);
+    if (isNaN(cuitNumber)) {
+      throw new Error(`CUIT inválido: ${credential.tenant.cuit}`);
+    }
+
+    const isProduction = credential.tenant.mode === "PRODUCCION";
+    const afip = new Afip({
       cuit: cuitNumber,
-      cert: certPem,
-      key: keyPem,
+      cert: credential.certPem,
+      key: credential.keyPem,
       production: isProduction,
     });
+
+    this.afipInstances.set(tenantId, afip);
+    return afip;
   }
 
-  // ---- HELPERS NUEVOS ----
+  // ✅ MÉTODOS BÁSICOS DE CONSULTA (usando la librería directamente)
 
-  /** Lee CbteNro robustamente sin importar si viene con mayúscula/minúscula o como número directo */
-  private parseLastVoucherNumber(last: any): number {
-    if (last == null) return 0;
-    if (typeof last === "number") return last;
-    const n =
-      last.CbteNro ??
-      last.cbteNro ??
-      last.VoucherNumber ??
-      last.voucherNumber ??
-      0;
-    const num = Number(n);
-    return Number.isFinite(num) ? num : 0;
-  }
-
-  /** ✅ Mapea estado fiscal del cliente a CondicionIVAReceptorId usando tipos estandarizados */
-  private mapTaxStatusToCondId(status?: TaxConditionUI): AfipTaxCondition | undefined {
-    if (!status) return undefined;
-    
+  /**
+   * Obtiene el último número de comprobante
+   */
+  async getLastVoucher(tenantId: string, ptoVta: number, cbteTipo: number): Promise<number> {
     try {
-      return convertTaxConditionUIToAfip(status);
+      const afip = await this.getAfipInstance(tenantId);
+      const lastVoucher = await afip.electronicBillingService.getLastVoucher(ptoVta, cbteTipo);
+      
+      // La librería devuelve el número directamente
+      return Number(lastVoucher) || 0;
     } catch (error) {
-      console.warn(`⚠️ Estado fiscal no reconocido: ${status}`);
-      return undefined;
+      console.error("❌ Error obteniendo último comprobante:", error);
+      return 0;
     }
   }
 
   /**
-   * ✅ Resuelve CondicionIVAReceptorId usando tipos estandarizados:
-   * 1) si viene explícito, lo usa;
-   * 2) si hay taxStatus, lo mapea;
-   * 3) heurística por DocTipo usando códigos AFIP oficiales
-   * 4) considera el tipo de comprobante para evitar incompatibilidades
+   * Obtiene información de un comprobante específico
    */
+  async getVoucherInfo(tenantId: string, cbteNro: number, ptoVta: number, cbteTipo: number) {
+    try {
+      const afip = await this.getAfipInstance(tenantId);
+      return await afip.electronicBillingService.getVoucherInfo(cbteNro, ptoVta, cbteTipo);
+    } catch (error) {
+      console.error("❌ Error obteniendo información del comprobante:", error);
+      throw new Error(`Error obteniendo información del comprobante: ${error}`);
+    }
+  }
+
+  /**
+   * Obtiene los puntos de venta disponibles
+   */
+  async getPointsOfSale(tenantId: string) {
+    try {
+      const afip = await this.getAfipInstance(tenantId);
+      const salesPoints = await afip.electronicBillingService.getSalesPoints();
+      console.log("🔍 Puntos de venta recibidos:", salesPoints);
+      return Array.isArray(salesPoints) ? salesPoints : [];
+    } catch (error) {
+      console.error("❌ Error obteniendo puntos de venta:", error);
+      return [];
+    }
+  }
+
+  // ✅ MÉTODOS DE TIPOS Y CONSULTAS (aprovechando la librería)
+
+  /**
+   * Obtiene todos los tipos de comprobantes disponibles desde AFIP
+   */
+  async getVoucherTypes(tenantId: string) {
+    try {
+      const afip = await this.getAfipInstance(tenantId);
+      return await afip.electronicBillingService.getVoucherTypes();
+    } catch (error) {
+      console.error("❌ Error obteniendo tipos de comprobante:", error);
+      throw new Error("Error al obtener tipos de comprobante de AFIP");
+    }
+  }
+
+  /**
+   * Obtiene todos los tipos de conceptos disponibles desde AFIP
+   */
+  async getConceptTypes(tenantId: string) {
+    try {
+      const afip = await this.getAfipInstance(tenantId);
+      return await afip.electronicBillingService.getConceptTypes();
+    } catch (error) {
+      console.error("❌ Error obteniendo tipos de concepto:", error);
+      throw new Error("Error al obtener tipos de concepto de AFIP");
+    }
+  }
+
+  /**
+   * Obtiene todos los tipos de documentos disponibles desde AFIP
+   */
+  async getDocumentTypes(tenantId: string) {
+    try {
+      const afip = await this.getAfipInstance(tenantId);
+      return await afip.electronicBillingService.getDocumentTypes();
+    } catch (error) {
+      console.error("❌ Error obteniendo tipos de documento:", error);
+      throw new Error("Error al obtener tipos de documento de AFIP");
+    }
+  }
+
+  /**
+   * Obtiene todas las alícuotas de IVA disponibles desde AFIP
+   */
+  async getAliquotTypes(tenantId: string) {
+    try {
+      const afip = await this.getAfipInstance(tenantId);
+      return await afip.electronicBillingService.getAliquotTypes();
+    } catch (error) {
+      console.error("❌ Error obteniendo tipos de alícuota:", error);
+      throw new Error("Error al obtener tipos de alícuota de AFIP");
+    }
+  }
+
+  /**
+   * Obtiene todos los tipos de monedas disponibles desde AFIP
+   */
+  async getCurrencyTypes(tenantId: string) {
+    try {
+      const afip = await this.getAfipInstance(tenantId);
+      return await afip.electronicBillingService.getCurrenciesTypes();
+    } catch (error) {
+      console.error("❌ Error obteniendo tipos de moneda:", error);
+      throw new Error("Error al obtener tipos de moneda de AFIP");
+    }
+  }
+
+  /**
+   * Obtiene todos los tipos de opciones disponibles desde AFIP
+   */
+  async getOptionsTypes(tenantId: string) {
+    try {
+      const afip = await this.getAfipInstance(tenantId);
+      return await afip.electronicBillingService.getOptionsTypes();
+    } catch (error) {
+      console.error("❌ Error obteniendo tipos de opciones:", error);
+      throw new Error("Error al obtener tipos de opciones de AFIP");
+    }
+  }
+
+  /**
+   * Obtiene todos los tipos de tributos disponibles desde AFIP
+   */
+  async getTaxTypes(tenantId: string) {
+    try {
+      const afip = await this.getAfipInstance(tenantId);
+      return await afip.electronicBillingService.getTaxTypes();
+    } catch (error) {
+      console.error("❌ Error obteniendo tipos de tributos:", error);
+      throw new Error("Error al obtener tipos de tributos de AFIP");
+    }
+  }
+
+  /**
+   * Obtiene el estado del servidor de AFIP
+   */
+  async getServerStatus(tenantId: string) {
+    try {
+      const afip = await this.getAfipInstance(tenantId);
+      return await afip.electronicBillingService.getServerStatus();
+    } catch (error) {
+      console.error("❌ Error obteniendo estado del servidor:", error);
+      throw new Error("Error al obtener estado del servidor AFIP");
+    }
+  }
+
+  // ✅ MÉTODOS HELPERS MEJORADOS
+
   private resolveCondIVAReceptorId(params: {
     explicitId?: AfipTaxCondition;
     taxStatus?: TaxConditionUI;
     docTipo?: AfipDocumentType;
-    cbteTipo?: AfipInvoiceType; // ✅ NUEVO: considerar tipo de comprobante
+    cbteTipo?: AfipInvoiceType;
   }): AfipTaxCondition {
     console.log("🔍 Resolviendo CondicionIVAReceptorId:", params);
     
     if (params.explicitId) {
-      console.log("✅ Usando ID explícito:", params.explicitId);
       return params.explicitId;
     }
     
-    const fromStatus = this.mapTaxStatusToCondId(params.taxStatus);
-    if (fromStatus) {
-      console.log("✅ Mapeado desde taxStatus:", params.taxStatus, "->", fromStatus);
-      return fromStatus;
+    if (params.taxStatus) {
+      try {
+        return convertTaxConditionUIToAfip(params.taxStatus);
+      } catch (error) {
+        console.warn(`⚠️ Estado fiscal no reconocido: ${params.taxStatus}`);
+      }
     }
 
-    // ✅ Heurística mejorada considerando tipo de comprobante y DocTipo
-    let result: AfipTaxCondition;
-    
+    // Heurística mejorada
     if (params.docTipo === AFIP_DOCUMENT_TYPES.CF || params.docTipo === AFIP_DOCUMENT_TYPES.DNI) {
-      result = AFIP_TAX_CONDITIONS.CONSUMIDOR_FINAL;
-      console.log("✅ Heurística por DocTipo (CF/DNI -> CF):", result);
+      return AFIP_TAX_CONDITIONS.CONSUMIDOR_FINAL;
     } else if (params.docTipo === AFIP_DOCUMENT_TYPES.CUIT) {
-      // ✅ Para CUIT, considerar el tipo de comprobante
       if (params.cbteTipo === AFIP_INVOICE_TYPES.FACTURA_A) {
-        result = AFIP_TAX_CONDITIONS.RESPONSABLE_INSCRIPTO; // Factura A siempre RI
-        console.log("✅ Heurística CUIT + FACTURA_A -> RI:", result);
+        return AFIP_TAX_CONDITIONS.RESPONSABLE_INSCRIPTO;
       } else if (params.cbteTipo === AFIP_INVOICE_TYPES.FACTURA_B) {
-        result = AFIP_TAX_CONDITIONS.MONOTRIBUTO; // Factura B con CUIT probablemente Monotrib
-        console.log("✅ Heurística CUIT + FACTURA_B -> MONOTRIBUTO:", result);
+        return AFIP_TAX_CONDITIONS.MONOTRIBUTO;
       } else {
-        result = AFIP_TAX_CONDITIONS.RESPONSABLE_INSCRIPTO; // Default para otros casos
-        console.log("✅ Heurística CUIT (otro tipo) -> RI:", result);
+        return AFIP_TAX_CONDITIONS.RESPONSABLE_INSCRIPTO;
       }
-    } else {
-      result = AFIP_TAX_CONDITIONS.CONSUMIDOR_FINAL; // Fallback más seguro
-      console.log("✅ Fallback seguro (CF):", result);
     }
     
-    return result;
+    return AFIP_TAX_CONDITIONS.CONSUMIDOR_FINAL;
   }
 
-  // ------------------------
+  // ✅ MÉTODO PRINCIPAL: createVoucher (usando la librería directamente)
 
-  async createInvoice(tenantId: string, invoiceData: AfipInvoiceData): Promise<AfipInvoiceResponse> {
+  /**
+   * Crea un comprobante usando directamente createVoucher de la librería
+   */
+  async createVoucher(tenantId: string, invoiceData: AfipInvoiceData): Promise<AfipInvoiceResponse> {
     try {
       console.log("🔄 Iniciando facturación electrónica para tenant:", tenantId);
-      console.log("📋 Datos de factura:", JSON.stringify(invoiceData, null, 2));
 
-      // Obtener credenciales del tenant
-      const credential = await prisma.afipCredential.findUnique({
-        where: { tenantId },
-        include: { tenant: true },
-      });
-      if (!credential || !credential.tenant) {
-        throw new Error("Credenciales AFIP no configuradas para este tenant");
-      }
+      const afip = await this.getAfipInstance(tenantId);
 
-      console.log("🏢 Tenant encontrado:", credential.tenant.name, "CUIT:", credential.tenant.cuit);
-
-      const isProduction = credential.tenant.mode === "PRODUCCION";
-      const afip = this.getAfipInstance(
-        credential.tenant.cuit,
-        credential.certPem,
-        credential.keyPem,
-        isProduction
-      );
-
-      console.log("🔍 Obteniendo último número de comprobante...");
-      console.log("📍 Punto de venta:", invoiceData.ptoVta, "Tipo comprobante:", invoiceData.cbteTipo);
-
-      const lastInvoiceNumber = await afip.electronicBillingService.getLastVoucher(
-        invoiceData.ptoVta,
-        invoiceData.cbteTipo
-      );
-
-      console.log("📄 Último comprobante AFIP:", JSON.stringify(lastInvoiceNumber, null, 2));
-      const lastNumber = this.parseLastVoucherNumber(lastInvoiceNumber);
-      const nextInvoiceNumber = (Number.isFinite(lastNumber) ? lastNumber : 0) + 1;
-      console.log("🔢 Próximo número de comprobante:", nextInvoiceNumber);
+      // Obtener próximo número usando la librería
+      const lastNumber = await this.getLastVoucher(tenantId, invoiceData.ptoVta, invoiceData.cbteTipo);
+      const nextNumber = lastNumber + 1;
 
       const fechaCbte = new Date().toISOString().slice(0, 10).replace(/-/g, "");
 
-      // Resolver Condición IVA del receptor (OBLIGATORIO desde RG 5616)
+      // Resolver condición IVA del receptor
       const condIVAId = this.resolveCondIVAReceptorId({
         explicitId: invoiceData.condicionIVAReceptorId,
         taxStatus: invoiceData.taxStatus,
         docTipo: invoiceData.docTipo,
-        cbteTipo: invoiceData.cbteTipo, // ✅ NUEVO: considerar tipo de comprobante
+        cbteTipo: invoiceData.cbteTipo,
       });
 
-      // Preparar datos para afip.ts (estructura que acepta la lib)
-      const invoice: any = {
+      // ✅ Preparar datos usando la estructura exacta de afip.ts
+      const voucherData: any = {
         CantReg: 1,
         PtoVta: invoiceData.ptoVta,
         CbteTipo: invoiceData.cbteTipo,
-        Concepto: invoiceData.concepto ?? 1, // default: Productos
+        Concepto: invoiceData.concepto ?? 1,
         DocTipo: invoiceData.docTipo,
         DocNro: invoiceData.docNro,
-        CbteDesde: nextInvoiceNumber,
-        CbteHasta: nextInvoiceNumber,
-        CbteFch: fechaCbte,
-
+        CbteDesde: nextNumber,
+        CbteHasta: nextNumber,
+        CbteFch: fechaCbte, // String en lugar de number
         ImpTotal: Number(invoiceData.impTotal.toFixed(2)),
         ImpTotConc: Number((invoiceData.impTotConc || 0).toFixed(2)),
         ImpNeto: Number(invoiceData.impNeto.toFixed(2)),
         ImpOpEx: Number((invoiceData.impOpEx || 0).toFixed(2)),
         ImpIVA: Number(invoiceData.impIVA.toFixed(2)),
         ImpTrib: Number((invoiceData.impTrib || 0).toFixed(2)),
-
         MonId: "PES",
         MonCotiz: 1,
-
-        // NUEVO: obligatorio → Condición frente al IVA del receptor
         CondicionIVAReceptorId: condIVAId,
       };
 
-      // Agregar alícuotas si corresponde
+      // Agregar alícuotas si hay IVA
       if (invoiceData.impIVA > 0) {
-        invoice.Iva = [
+        voucherData.Iva = [
           {
             Id: 5, // 21%
             BaseImp: Number(invoiceData.impNeto.toFixed(2)),
@@ -244,171 +331,155 @@ export class AfipService {
         ];
       }
 
-      console.log("📝 Datos de factura a enviar a AFIP:", JSON.stringify(invoice, null, 2));
-      console.log("🔍 CondicionIVAReceptorId resuelto:", condIVAId);
+      console.log("📝 Enviando a AFIP:", voucherData);
 
-      console.log("🚀 Enviando factura a AFIP...");
-      const result = await afip.electronicBillingService.createInvoice(invoice);
+      // ✅ Usar createVoucher directamente (recomendado por la documentación)
+      const result: any = await afip.electronicBillingService.createVoucher(voucherData);
+      console.log("✅ Respuesta de AFIP:", result);
 
-      console.log("✅ Respuesta de AFIP:", JSON.stringify(result, null, 2));
+      // La librería puede devolver diferentes formatos, extraer datos
+      let cae = "";
+      let caeFchVto = "";
+      let resultado = "A";
 
-      const response = (result as any).response || result;
-      const detResp = (response as any).FeDetResp?.FECAEDetResponse?.[0] || {};
-      const cabResp = (response as any).FeCabResp || {};
+      if (result.cae || result.CAE) {
+        // Formato simple de la librería
+        cae = result.cae || result.CAE;
+        caeFchVto = result.caeFchVto || result.CAEFchVto || "";
+      } else if (result.response || result.FeDetResp) {
+        // Formato complejo de respuesta
+        const response = result.response || result;
+        const detResp = response.FeDetResp?.FECAEDetResponse?.[0] || {};
+        cae = detResp.CAE || detResp.cae || "";
+        caeFchVto = detResp.CAEFchVto || detResp.caeFchVto || "";
+        resultado = detResp.Resultado || detResp.resultado || "R";
+      }
 
-      const cae = detResp.CAE || (result as any).cae || "";
-      const caeFchVto = detResp.CAEFchVto || (result as any).caeFchVto || "";
-      const resultado = detResp.Resultado || cabResp.Resultado || "R";
-      const observaciones = detResp.Observaciones?.Obs || [];
-      const errores = (response as any).Errors?.Err || [];
+      const invoiceResponse: AfipInvoiceResponse = {
+        cae,
+        caeFchVto,
+        cbteNumero: nextNumber,
+        resultado,
+        observaciones: result.observaciones || [],
+        errores: result.errores || [],
+      };
 
-      console.log("📊 Datos extraídos:", { cae, caeFchVto, resultado, observaciones, errores });
-
+      // Guardar en base de datos
       await this.saveInvoiceToDatabase(tenantId, {
         ptoVta: invoiceData.ptoVta,
         cbteTipo: invoiceData.cbteTipo,
-        cbteNumero: nextInvoiceNumber,
+        cbteNumero: nextNumber,
         cae,
         caeFchVto,
-        resultado,
-        observaciones,
-        errores,
       });
+
+      return invoiceResponse;
+    } catch (error) {
+      console.error("❌ Error creando comprobante:", error);
+      throw new Error(`Error en facturación electrónica: ${error}`);
+    }
+  }
+
+  /**
+   * ✅ ALTERNATIVA: createNextVoucher (maneja automáticamente el número siguiente)
+   */
+  async createNextVoucher(tenantId: string, invoiceData: AfipInvoiceData): Promise<AfipInvoiceResponse & { voucher_number: number }> {
+    try {
+      const afip = await this.getAfipInstance(tenantId);
+
+      const fechaCbte = new Date().toISOString().slice(0, 10).replace(/-/g, "");
+      const condIVAId = this.resolveCondIVAReceptorId({
+        explicitId: invoiceData.condicionIVAReceptorId,
+        taxStatus: invoiceData.taxStatus,
+        docTipo: invoiceData.docTipo,
+        cbteTipo: invoiceData.cbteTipo,
+      });
+
+      const voucherData: any = {
+        CantReg: 1,
+        PtoVta: invoiceData.ptoVta,
+        CbteTipo: invoiceData.cbteTipo,
+        Concepto: invoiceData.concepto ?? 1,
+        DocTipo: invoiceData.docTipo,
+        DocNro: invoiceData.docNro,
+        CbteFch: fechaCbte, // String en lugar de number
+        ImpTotal: Number(invoiceData.impTotal.toFixed(2)),
+        ImpTotConc: Number((invoiceData.impTotConc || 0).toFixed(2)),
+        ImpNeto: Number(invoiceData.impNeto.toFixed(2)),
+        ImpOpEx: Number((invoiceData.impOpEx || 0).toFixed(2)),
+        ImpIVA: Number(invoiceData.impIVA.toFixed(2)),
+        ImpTrib: Number((invoiceData.impTrib || 0).toFixed(2)),
+        MonId: "PES",
+        MonCotiz: 1,
+        CondicionIVAReceptorId: condIVAId,
+      };
+
+      if (invoiceData.impIVA > 0) {
+        voucherData.Iva = [
+          {
+            Id: 5,
+            BaseImp: Number(invoiceData.impNeto.toFixed(2)),
+            Importe: Number(invoiceData.impIVA.toFixed(2)),
+          },
+        ];
+      }
+
+      // ✅ createNextVoucher maneja automáticamente el número siguiente
+      const result: any = await afip.electronicBillingService.createNextVoucher(voucherData);
+      console.log("✅ Respuesta createNextVoucher:", result);
 
       return {
-        cae,
-        caeFchVto,
-        cbteNumero: nextInvoiceNumber,
-        resultado,
-        observaciones,
-        errores,
+        cae: result.cae || result.CAE || "",
+        caeFchVto: result.caeFchVto || result.CAEFchVto || "",
+        cbteNumero: result.voucherNumber || result.voucher_number || 0,
+        voucher_number: result.voucherNumber || result.voucher_number || 0,
+        resultado: "A",
+        observaciones: [],
+        errores: [],
       };
     } catch (error) {
-      console.error("Error creando factura con AFIP:", error);
-      throw new Error(`Error en facturación electrónica: ${(error as any).message || error}`);
+      console.error("❌ Error con createNextVoucher:", error);
+      throw new Error(`Error en createNextVoucher: ${error}`);
     }
   }
 
-  async getPointsOfSale(tenantId: string): Promise<any[]> {
-    try {
-      const credential = await prisma.afipCredential.findUnique({
-        where: { tenantId },
-        include: { tenant: true },
-      });
-      if (!credential || !credential.tenant) {
-        return [];
-      }
+  // ✅ MÉTODO MEJORADO para procesar desde venta
 
-      const isProduction = credential.tenant.mode === "PRODUCCION";
-      const afip = this.getAfipInstance(
-        credential.tenant.cuit,
-        credential.certPem,
-        credential.keyPem,
-        isProduction
-      );
-
-      const pointsOfSale = await afip.electronicBillingService.getSalesPoints();
-      console.log("🔍 Puntos de venta recibidos:", JSON.stringify(pointsOfSale, null, 2));
-
-      const response = pointsOfSale as any;
-      const result =
-        response?.PtoVenta ||
-        response?.salesPoints ||
-        response?.data ||
-        (Array.isArray(pointsOfSale) ? pointsOfSale : []);
-      return Array.isArray(result) ? result : [];
-    } catch (error) {
-      console.error("Error obteniendo puntos de venta:", error);
-      return [];
-    }
-  }
-
-  async getVoucherInfo(tenantId: string, number: number, salePoint: number, type: number): Promise<any> {
-    try {
-      const credential = await prisma.afipCredential.findUnique({
-        where: { tenantId },
-        include: { tenant: true },
-      });
-      if (!credential || !credential.tenant) {
-        throw new Error("Credenciales AFIP no configuradas para este tenant");
-      }
-
-      const isProduction = credential.tenant.mode === "PRODUCCION";
-      const afip = this.getAfipInstance(
-        credential.tenant.cuit,
-        credential.certPem,
-        credential.keyPem,
-        isProduction
-      );
-
-      return await afip.electronicBillingService.getVoucherInfo(number, salePoint, type);
-    } catch (error) {
-      console.error("Error obteniendo información del comprobante:", error);
-      throw new Error(`Error obteniendo información del comprobante: ${(error as any).message || error}`);
-    }
-  }
-
-  private async saveInvoiceToDatabase(tenantId: string, invoiceData: any): Promise<void> {
-    try {
-      // Implementá aquí si querés persistir AfipInvoice
-    } catch (error) {
-      console.error("Error guardando factura en base de datos:", error);
-    }
-  }
-
-  // Procesa facturación desde una venta de tu sistema
- /*  async procesarFacturacionFromSale(params: {
+  async procesarFacturacionFromSale(params: {
     tenantId: string;
     sale: any;
-    tipoFactura: string;
+    tipoFactura: InvoiceTypeUI;
     puntoVenta: number;
-    customer?: any; // Customer inline opcional
+    customer?: any;
   }): Promise<AfipInvoiceResponse> {
     const { tenantId, sale, tipoFactura, puntoVenta } = params;
-    // VALIDACIÓN CRÍTICA: Verificar que la venta tenga ID
-    if (!sale || !sale.id) {
-      throw new Error("La venta debe tener un ID válido antes de procesar la facturación");
-    }
-    const tiposFactura = {
-      FACTURA_A: 1,
-      FACTURA_B: 6,
-      FACTURA_C: 11,
-    } as const;
 
-    const cbteTipo = (tiposFactura as any)[tipoFactura];
-    if (!cbteTipo) {
-      throw new Error(`Tipo de factura no válido: ${tipoFactura}`);
+    if (!sale?.id) {
+      throw new Error("La venta debe tener un ID válido");
     }
 
-    // Doc del receptor - puede venir del customer de la sale O del parámetro customer inline
-    let docTipo = 99; // CF por defecto
-    let docNro = 0;
-    let taxStatus: CustomerTaxStatus | undefined;
+    if (sale.tenantId !== tenantId) {
+      throw new Error("Violación de seguridad multitenant");
+    }
+
+    const cbteTipo = convertInvoiceTypeUIToAfip(tipoFactura);
     
-    // Priorizar customer inline en params, luego sale.customer
+    // Determinar datos del cliente
     const customerData = params.customer || sale.customer;
+    let docTipo: AfipDocumentType = AFIP_DOCUMENT_TYPES.CF;
+    let docNro = 0;
+    let taxStatus: TaxConditionUI | undefined;
     
-    if (customerData && customerData.documentType && customerData.documentNumber) {
-      switch (customerData.documentType) {
-        case "CUIT":
-          docTipo = 80;
-          docNro = parseInt(String(customerData.documentNumber).replace(/\D/g, ""), 10);
-          break;
-        case "DNI":
-          docTipo = 96;
-          docNro = parseInt(String(customerData.documentNumber).replace(/\D/g, ""), 10);
-          break;
-        default:
-          docTipo = 99;
-          docNro = 0;
+    if (customerData?.documentType && customerData?.documentNumber) {
+      try {
+        docTipo = convertDocumentTypeUIToAfip(customerData.documentType as DocumentTypeUI);
+        docNro = parseInt(String(customerData.documentNumber).replace(/\D/g, ""), 10);
+        taxStatus = customerData.taxStatus as TaxConditionUI;
+      } catch (error) {
+        console.warn("⚠️ Tipo de documento no reconocido, usando CF");
+        docTipo = AFIP_DOCUMENT_TYPES.CF;
+        docNro = 0;
       }
-      taxStatus = customerData.taxStatus as CustomerTaxStatus;
-    }
-    
-    console.log("👤 Datos del receptor:", { docTipo, docNro, taxStatus, hasCustomer: !!customerData });
-
-    if (cbteTipo === 1 && docTipo !== 80) {
-      throw new Error("Para Factura A, el cliente debe tener CUIT válido");
     }
 
     const invoiceData: AfipInvoiceData = {
@@ -419,248 +490,66 @@ export class AfipService {
       impNeto: Number(sale.subtotal || 0),
       impIVA: Number(sale.taxTotal || 0),
       impTotal: Number(sale.grandTotal || 0),
-
-      // NUEVO: pasamos señales para CondicionIVAReceptorId
-      taxStatus: taxStatus,
-      // si ya lo traés normalizado en tu modelo, podrías setear:
-      // condicionIVAReceptorId: <id>,
-
-      // opcional: si facturás servicios
+      taxStatus,
       concepto: sale.concepto as 1 | 2 | 3 | undefined,
-
-      conceptoItems:
-        sale.items?.map((item: any) => ({
-          qty: item.quantity,
-          description: item.productName,
-          unitPrice: Number(item.unitPrice),
-        })) || [],
-    };
-
-    const result = await this.createInvoice(tenantId, invoiceData);
-
-    const updateData: any = {
-      cbteNro: result.cbteNumero,
-      cbteTipo: cbteTipo,
-      ptoVta: puntoVenta,
-    };
-
-    if (result.cae && result.cae.trim() !== "") {
-      updateData.cae = result.cae;
-      updateData.status = "COMPLETED";
-    } else {
-      updateData.status = "DRAFT";
-      updateData.afipError = `Factura rechazada por AFIP. Errores/Obs: ${JSON.stringify(
-        result.errores || result.observaciones
-      )}`;
-    }
-
-    if (result.caeFchVto && result.caeFchVto.trim() !== "") {
-      const year = result.caeFchVto.substring(0, 4);
-      const month = result.caeFchVto.substring(4, 6);
-      const day = result.caeFchVto.substring(6, 8);
-      updateData.caeVto = new Date(`${year}-${month}-${day}T23:59:59.000Z`);
-    }
-
-    await prisma.sale.update({
-      where: { id: sale.id },
-      data: updateData,
-    });
-
-    return result;
-  } */
-// ✅ Procesa facturación desde una venta de tu sistema - VERSIÓN MEJORADA CON TIPOS
-async procesarFacturacionFromSale(params: {
-  tenantId: string;
-  sale: any;
-  tipoFactura: InvoiceTypeUI;
-  puntoVenta: number;
-  customer?: any;
-}): Promise<AfipInvoiceResponse> {
-  const { tenantId, sale, tipoFactura, puntoVenta } = params;
-
-  // ✅ VALIDACIÓN CRÍTICA: Verificar integridad de datos
-  if (!tenantId) {
-    throw new Error("TenantId es requerido para procesar facturación");
-  }
-
-  if (!sale) {
-    throw new Error("Datos de venta son requeridos para procesar facturación");
-  }
-
-  if (!sale.id) {
-    throw new Error("La venta debe tener un ID válido antes de procesar la facturación AFIP");
-  }
-
-  // Validar que la venta pertenece al tenant
-  if (sale.tenantId !== tenantId) {
-    throw new Error("La venta no pertenece al tenant especificado - Violación de seguridad multitenant");
-  }
-
-  // ✅ Usar convertidor tipado para obtener código AFIP
-  let cbteTipo: AfipInvoiceType;
-  try {
-    cbteTipo = convertInvoiceTypeUIToAfip(tipoFactura);
-  } catch (error) {
-    throw new Error(`Tipo de factura no válido: ${tipoFactura}`);
-  }
-
-  // Validar montos de la venta
-  if (!sale.grandTotal || sale.grandTotal <= 0) {
-    throw new Error("La venta debe tener un monto total válido");
-  }
-
-  console.log("🔍 Procesando facturación AFIP:", {
-    saleId: sale.id,
-    tenantId,
-    tipoFactura,
-    puntoVenta,
-    grandTotal: sale.grandTotal
-  });
-
-  // ✅ Doc del receptor - puede venir del customer de la sale O del parámetro customer inline
-  let docTipo: AfipDocumentType = AFIP_DOCUMENT_TYPES.CF; // CF por defecto
-  let docNro = 0;
-  let taxStatus: TaxConditionUI | undefined;
-  
-  // Priorizar customer inline en params, luego sale.customer
-  const customerData = params.customer || sale.customer;
-  
-  if (customerData && customerData.documentType && customerData.documentNumber) {
-    try {
-      // ✅ Convertir documentType de UI a código AFIP
-      const documentTypeUI = customerData.documentType as DocumentTypeUI;
-      docTipo = convertDocumentTypeUIToAfip(documentTypeUI);
-      docNro = parseInt(String(customerData.documentNumber).replace(/\D/g, ""), 10);
-      
-      // ✅ Validar que el número de documento sea válido
-      if (isNaN(docNro) || docNro <= 0) {
-        throw new Error(`Número de documento inválido: ${customerData.documentNumber}`);
-      }
-      
-    } catch (error) {
-      console.warn("⚠️ Tipo de documento no reconocido, usando CF:", customerData.documentType);
-      docTipo = AFIP_DOCUMENT_TYPES.CF;
-      docNro = 0;
-    }
-    
-    taxStatus = customerData.taxStatus as TaxConditionUI;
-  }
-  
-  console.log("👤 Datos del receptor:", { docTipo, docNro, taxStatus, hasCustomer: !!customerData });
-
-  // ✅ Validación mejorada para Factura A
-  if (cbteTipo === AFIP_INVOICE_TYPES.FACTURA_A) {
-    if (docTipo !== AFIP_DOCUMENT_TYPES.CUIT) {
-      throw new Error("Para Factura A, el cliente debe tener CUIT válido");
-    }
-    if (!taxStatus || taxStatus !== 'RESPONSABLE_INSCRIPTO') {
-      throw new Error("Para Factura A, el cliente debe ser Responsable Inscripto");
-    }
-  }
-
-  const invoiceData: AfipInvoiceData = {
-    ptoVta: puntoVenta,
-    cbteTipo,
-    docTipo,
-    docNro,
-    impNeto: Number(sale.subtotal || 0),
-    impIVA: Number(sale.taxTotal || 0),
-    impTotal: Number(sale.grandTotal || 0),
-
-    // NUEVO: pasamos señales para CondicionIVAReceptorId
-    taxStatus: taxStatus,
-    
-    // opcional: si facturás servicios
-    concepto: sale.concepto as 1 | 2 | 3 | undefined,
-
-    conceptoItems:
-      sale.items?.map((item: any) => ({
+      conceptoItems: sale.items?.map((item: any) => ({
         qty: item.quantity,
         description: item.productName,
         unitPrice: Number(item.unitPrice),
       })) || [],
-  };
-
-  try {
-    const result = await this.createInvoice(tenantId, invoiceData);
-
-    // ✅ VALIDACIÓN: Solo actualizar si tenemos un ID válido de venta
-    if (!sale.id) {
-      throw new Error("No se puede actualizar la venta: ID de venta no válido");
-    }
-
-    const updateData: any = {
-      cbteNro: result.cbteNumero,
-      cbteTipo: cbteTipo,
-      ptoVta: puntoVenta,
     };
 
-    if (result.cae && result.cae.trim() !== "") {
-      updateData.cae = result.cae;
-      updateData.status = "CONFIRMED"; // Cambiado de COMPLETED a CONFIRMED para consistencia
-      updateData.afipStatus = "APPROVED";
-    } else {
-      updateData.status = "DRAFT";
-      updateData.afipStatus = "REJECTED";
-      updateData.afipError = `Factura rechazada por AFIP. Errores/Obs: ${JSON.stringify(
-        result.errores || result.observaciones
-      )}`;
-    }
-
-    if (result.caeFchVto && result.caeFchVto.trim() !== "") {
-      const year = result.caeFchVto.substring(0, 4);
-      const month = result.caeFchVto.substring(4, 6);
-      const day = result.caeFchVto.substring(6, 8);
-      updateData.caeVto = new Date(`${year}-${month}-${day}T23:59:59.000Z`);
-    }
-
-    // ✅ SEGURIDAD MULTITENANT: Actualizar con filtro de tenant
-    const updatedSale = await prisma.sale.updateMany({
-      where: { 
-        id: sale.id,
-        tenantId: tenantId // ✅ CRÍTICO: Filtro de seguridad multitenant
-      },
-      data: updateData,
-    });
-
-    if (updatedSale.count === 0) {
-      throw new Error("No se pudo actualizar la venta - Posible violación de seguridad multitenant");
-    }
-
-    console.log("✅ Venta actualizada con datos AFIP:", {
-      saleId: sale.id,
-      cae: result.cae,
-      cbteNumero: result.cbteNumero
-    });
-
-    return result;
-
-  } catch (error) {
-    console.error("❌ Error en procesarFacturacionFromSale:", {
-      saleId: sale.id,
-      tenantId,
-      error: error instanceof Error ? error.message : String(error)
-    });
-    
-    // Registrar el error en la venta si es posible
     try {
+      // ✅ Usar createVoucher (método recomendado)
+      const result = await this.createVoucher(tenantId, invoiceData);
+
+      // Actualizar la venta
+      const updateData: any = {
+        cbteNro: result.cbteNumero,
+        cbteTipo: cbteTipo,
+        ptoVta: puntoVenta,
+        afipStatus: result.cae ? "APPROVED" : "REJECTED",
+        status: result.cae ? "CONFIRMED" : "DRAFT",
+      };
+
+      if (result.cae) {
+        updateData.cae = result.cae;
+      }
+
+      if (result.caeFchVto) {
+        const year = result.caeFchVto.substring(0, 4);
+        const month = result.caeFchVto.substring(4, 6);
+        const day = result.caeFchVto.substring(6, 8);
+        updateData.caeVto = new Date(`${year}-${month}-${day}T23:59:59.000Z`);
+      }
+
       await prisma.sale.updateMany({
-        where: { 
-          id: sale.id,
-          tenantId: tenantId
-        },
+        where: { id: sale.id, tenantId },
+        data: updateData,
+      });
+
+      return result;
+    } catch (error) {
+      // Marcar error en la venta
+      await prisma.sale.updateMany({
+        where: { id: sale.id, tenantId },
         data: {
           afipStatus: "ERROR",
-          afipError: error instanceof Error ? error.message : String(error)
+          afipError: error instanceof Error ? error.message : String(error),
         }
       });
-    } catch (updateError) {
-      console.error("❌ No se pudo actualizar el error en la venta:", updateError);
+      throw error;
     }
+  }
 
-    throw error;
+  private async saveInvoiceToDatabase(tenantId: string, invoiceData: any): Promise<void> {
+    try {
+      // Implementa aquí la persistencia si la necesitas
+      console.log("💾 Guardando factura en BD:", invoiceData);
+    } catch (error) {
+      console.error("❌ Error guardando factura en BD:", error);
+    }
   }
 }
-  }
 
 export const afipService = new AfipService();
