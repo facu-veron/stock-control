@@ -73,9 +73,14 @@ export function convertLegacyTaxStatus(legacyStatus: string): TaxConditionUI {
     'Responsable Inscripto': 'RESPONSABLE_INSCRIPTO',
     'Monotributista': 'MONOTRIBUTO',
     'Monotributo': 'MONOTRIBUTO',
+    'MONOTRIBUTO': 'MONOTRIBUTO', // ✅ Agregar key exacta
+    'RESPONSABLE_INSCRIPTO': 'RESPONSABLE_INSCRIPTO', // ✅ Agregar key exacta
+    'EXENTO': 'EXENTO', // ✅ Agregar key exacta
+    'CONSUMIDOR_FINAL': 'CONSUMIDOR_FINAL', // ✅ Agregar key exacta
     'Exento': 'EXENTO',
     'Consumidor Final': 'CONSUMIDOR_FINAL',
     'No Categorizado': 'NO_CATEGORIZADO',
+    'NO_CATEGORIZADO': 'NO_CATEGORIZADO', // ✅ Agregar key exacta
     'Proveedor del Exterior': 'PROVEEDOR_EXTERIOR',
     'Cliente del Exterior': 'CLIENTE_EXTERIOR',
     'IVA Liberado - Ley 19.640': 'LIBERADO_LEY_19640',
@@ -101,33 +106,74 @@ export function convertLegacyInvoiceType(legacyType: string): InvoiceTypeUI {
   return mapping[legacyType] || 'TICKET';
 }
 
+// ✅ INFORMACIÓN DEL EMISOR (tu empresa)
+export interface CompanyInfo {
+  taxCondition: TaxConditionUI;
+  cuit: string;
+  canIssue: InvoiceTypeUI[];
+}
+
+// ✅ CONFIGURACIÓN DEL EMISOR
+// En un sistema real, esto se obtendría de la configuración del tenant
+export function getCompanyTaxInfo(): CompanyInfo {
+  // Tu empresa es Responsable Inscripto (CUIT: 20-29907425-1)
+  return {
+    taxCondition: 'RESPONSABLE_INSCRIPTO',
+    cuit: '20299074251',
+    canIssue: ['FACTURA_A', 'FACTURA_B', 'TICKET'] // RI puede emitir A y B
+  };
+}
+
 // ✅ VALIDACIONES DE COMPATIBILIDAD
+// IMPORTANTE: Validaciones para emisor RESPONSABLE INSCRIPTO
 export function validateInvoiceTypeForCustomer(
   invoiceType: InvoiceTypeUI,
   customerTaxCondition?: TaxConditionUI
 ): { valid: boolean; error?: string } {
-  if (!customerTaxCondition) {
-    return { valid: true }; // Sin cliente es válido para tickets
+  if (!customerTaxCondition || invoiceType === 'TICKET') {
+    return { valid: true }; // Sin cliente o tickets siempre válidos
   }
 
-  // Factura A solo para Responsables Inscriptos
-  if (invoiceType === 'FACTURA_A' && customerTaxCondition !== 'RESPONSABLE_INSCRIPTO') {
-    return {
-      valid: false,
-      error: 'Factura A solo puede emitirse a Responsables Inscriptos'
-    };
+  // ✅ REGLAS AFIP ARGENTINA CORRECTAS
+  // Para Responsable Inscripto (emisor) → Cliente (receptor)
+  
+  // Factura A: Solo entre Responsables Inscriptos
+  if (invoiceType === 'FACTURA_A') {
+    if (customerTaxCondition === 'RESPONSABLE_INSCRIPTO') {
+      return { valid: true };
+    } else {
+      return {
+        valid: false,
+        error: 'Factura A se emite solo entre Responsables Inscriptos'
+      };
+    }
   }
   
-  // Factura C solo para Consumidores Finales y No Categorizados
-  if (invoiceType === 'FACTURA_C' && 
-      !['CONSUMIDOR_FINAL', 'NO_CATEGORIZADO'].includes(customerTaxCondition)) {
-    return {
-      valid: false,
-      error: 'Factura C solo puede emitirse a Consumidores Finales o No Categorizados'
-    };
+  // Factura B: A Monotributo y Exentos
+  if (invoiceType === 'FACTURA_B') {
+    if (['MONOTRIBUTO', 'EXENTO'].includes(customerTaxCondition)) {
+      return { valid: true };
+    } else {
+      return {
+        valid: false,
+        error: 'Factura B se emite a Monotributistas y Exentos'
+      };
+    }
   }
   
-  return { valid: true };
+  // Factura C: A Consumidores Finales
+  if (invoiceType === 'FACTURA_C') {
+    if (customerTaxCondition === 'CONSUMIDOR_FINAL') {
+      return { valid: true };
+    } else {
+      return {
+        valid: false,
+        error: 'Factura C se emite a Consumidores Finales'
+      };
+    }
+  }
+  
+  return { valid: false, error: 'Tipo de factura no válido' };
 }
 
 export function validateDocumentTypeForTaxCondition(
@@ -159,7 +205,22 @@ export function validateDocumentTypeForTaxCondition(
   return { valid: true };
 }
 
+// ✅ MATRIZ DE FACTURACIÓN - RESPONSABLE INSCRIPTO EMISOR (CORREGIDA)
+// 
+// ┌─────────────────────────────┬──────────────┬─────────────┬─────────────────────────────┐
+// │         RECEPTOR            │ FACTURA TIPO │ CÓDIGO AFIP │         RAZÓN               │
+// ├─────────────────────────────┼──────────────┼─────────────┼─────────────────────────────┤
+// │ Responsable Inscripto       │ FACTURA_A    │     1       │ Entre RI (discrimina IVA)   │
+// │ Monotributista              │ FACTURA_B    │     6       │ RI → Monotributo            │
+// │ Exento                      │ FACTURA_B    │     6       │ RI → Exento                 │
+// │ Consumidor Final            │ FACTURA_C    │    11       │ RI → CF (IVA incluido)      │
+// │ No Categorizado             │ FACTURA_C    │    11       │ Similar a CF                │
+// │ Sin Cliente                 │ TICKET       │     -       │ Venta mostrador             │
+// └─────────────────────────────┴──────────────┴─────────────┴─────────────────────────────┘
+
 // ✅ DETERMINACIÓN AUTOMÁTICA DE TIPO DE FACTURA
+// IMPORTANTE: Esta función determina el tipo de factura que debe emitir
+// un RESPONSABLE INSCRIPTO (emisor) hacia diferentes tipos de receptores
 export function determineInvoiceTypeForCustomer(
   customerTaxCondition?: TaxConditionUI
 ): InvoiceTypeUI {
@@ -167,17 +228,33 @@ export function determineInvoiceTypeForCustomer(
     return 'TICKET';
   }
 
+  // ✅ EMISOR: Responsable Inscripto (empresa multitenant)
+  // ✅ REGLAS AFIP ARGENTINA CORRECTAS:
+  
   switch (customerTaxCondition) {
     case 'RESPONSABLE_INSCRIPTO':
+      // RI → RI = Factura A (entre responsables inscriptos)
       return 'FACTURA_A';
+      
     case 'MONOTRIBUTO':
+      // RI → Monotributo = Factura B ✅ (corregido)
+      return 'FACTURA_B';
+      
     case 'EXENTO':
+      // RI → Exento = Factura B
       return 'FACTURA_B';
+      
     case 'CONSUMIDOR_FINAL':
+      // RI → Consumidor Final = Factura C
+      return 'FACTURA_C';
+      
     case 'NO_CATEGORIZADO':
-      return 'FACTURA_B'; // O FACTURA_C según el negocio
+      // RI → No Categorizado = Factura C (tratamiento similar a CF)
+      return 'FACTURA_C';
+      
     default:
-      return 'FACTURA_B';
+      // Para casos especiales, usar Factura C como más compatible
+      return 'FACTURA_C';
   }
 }
 
@@ -317,4 +394,54 @@ export function validateDocumentNumber(number: string, type: DocumentTypeUI): bo
     default:
       return false;
   }
+}
+
+// ✅ FUNCIÓN DE TEST ESPECÍFICA PARA MONOTRIBUTO
+export function testMonotributoCase() {
+  console.log('🧪 TEST ESPECÍFICO - CASO MONOTRIBUTO');
+  console.log('===================================');
+  
+  // Simular cliente monotributista
+  const monotributoClient = {
+    name: 'Cliente Monotributista',
+    taxStatus: 'MONOTRIBUTO' as TaxConditionUI,
+    documentType: 'CUIL' as const,
+    documentNumber: '23415422229'
+  };
+  
+  console.log('📋 Cliente simulado:', monotributoClient);
+  
+  // Convertir taxStatus (simulando el proceso del componente)
+  const standardizedTaxStatus = typeof monotributoClient.taxStatus === 'string' 
+    ? convertLegacyTaxStatus(monotributoClient.taxStatus) || monotributoClient.taxStatus as TaxConditionUI
+    : monotributoClient.taxStatus;
+    
+  console.log('� TaxStatus normalizado:', {
+    original: monotributoClient.taxStatus,
+    standardized: standardizedTaxStatus
+  });
+  
+  // Determinar tipo de factura
+  const suggestedType = determineInvoiceTypeForCustomer(standardizedTaxStatus);
+  console.log('💡 Tipo de factura sugerido:', suggestedType);
+  
+  // Validar compatibilidad
+  const validation = validateInvoiceTypeForCustomer(suggestedType, standardizedTaxStatus);
+  console.log('✅ Validación:', validation);
+  
+  // Resultado esperado
+  const expected = {
+    invoiceType: 'FACTURA_A',
+    valid: true
+  };
+  
+  const success = suggestedType === expected.invoiceType && validation.valid === expected.valid;
+  console.log(`${success ? '✅' : '❌'} Resultado: ${success ? 'CORRECTO' : 'ERROR'}`);
+  
+  return {
+    success,
+    suggestedType,
+    validation,
+    standardizedTaxStatus
+  };
 }

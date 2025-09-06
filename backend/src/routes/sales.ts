@@ -9,7 +9,8 @@ import bcrypt from 'bcryptjs';
 import { 
   type InvoiceTypeUI,
   validateInvoiceTypeForCustomer,
-  validateDocumentTypeForTaxCondition
+  validateDocumentTypeForTaxCondition,
+  convertInvoiceTypeUIToAfip
 } from "../types/afip-types";
 
 const router = Router();
@@ -243,6 +244,16 @@ router.post(
 
         const grandTotal = subtotal + taxTotal;
 
+        // ✅ Determinar cbteTipo dinámicamente según el invoiceType
+        let cbteTipo = 0; // Por defecto para tickets
+        if (invoiceType !== "TICKET") {
+          try {
+            cbteTipo = convertInvoiceTypeUIToAfip(invoiceType as InvoiceTypeUI);
+          } catch {
+            cbteTipo = 1; // Fallback a FACTURA_A por compatibilidad
+          }
+        }
+
         // Crear la venta
         const newSale = await tx.sale.create({
           data: {
@@ -256,7 +267,7 @@ router.post(
             status: invoiceType === "TICKET" ? "CONFIRMED" : "DRAFT",
             paymentStatus: "PENDING",
             ptoVta: puntoVenta || 0,
-            cbteTipo: invoiceType === "TICKET" ? 0 : 1, // 0 para ticket, 1 por defecto para facturas
+            cbteTipo, // ✅ Ahora dinámico
             notes,
             items: {
               create: saleItems
@@ -490,5 +501,81 @@ router.get(
     }
   }
 );
+
+/**
+ * POST /api/sales/determine-invoice-type
+ * Determina automáticamente el tipo de factura según el cliente
+ */
+router.post(
+  "/determine-invoice-type",
+  authenticateToken,
+  body("customer").isObject(),
+  async (req: AuthenticatedRequest, res: Response) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({ 
+        success: false, 
+        error: "Datos del cliente inválidos", 
+        details: errors.array() 
+      });
+    }
+
+    const { customer } = req.body;
+
+    try {
+      // Determinar tipo de factura usando la lógica AFIP
+      const invoiceType = determineInvoiceTypeFromCustomer(customer.taxStatus);
+      
+      // Validar la combinación
+      const validation = validateInvoiceTypeForCustomer(invoiceType, customer.taxStatus);
+      
+      if (!validation.valid) {
+        return res.status(400).json({
+          success: false,
+          error: validation.error
+        });
+      }
+
+      return res.json({
+        success: true,
+        invoiceType,
+        customer: {
+          taxStatus: customer.taxStatus,
+          documentType: customer.documentType
+        },
+        afipRules: {
+          emisor: "RESPONSABLE_INSCRIPTO",
+          receptor: customer.taxStatus,
+          resultado: invoiceType
+        }
+      });
+
+    } catch (error) {
+      console.error("❌ Error determinando tipo de factura:", error);
+      return res.status(500).json({ 
+        success: false, 
+        error: "Error interno del servidor" 
+      });
+    }
+  }
+);
+
+/**
+ * Helper function para determinar tipo de factura
+ */
+function determineInvoiceTypeFromCustomer(customerTaxStatus: string): InvoiceTypeUI {
+  switch (customerTaxStatus) {
+    case 'RESPONSABLE_INSCRIPTO':
+      return 'FACTURA_A';
+    case 'MONOTRIBUTO':
+      return 'FACTURA_B';
+    case 'EXENTO':
+      return 'FACTURA_B';
+    case 'CONSUMIDOR_FINAL':
+      return 'FACTURA_C';
+    default:
+      return 'FACTURA_C';
+  }
+}
 
 export default router;

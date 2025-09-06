@@ -494,7 +494,9 @@ export const createSale = async (sale: CreateSaleRequest) => {
   }
   
   console.error("❌ createSale: respuesta con error:", response);
-  throw new Error(response?.error || response?.message || "Failed to create sale");
+  // Cast para acceder a propiedades de error
+  const errorResponse = response as any;
+  throw new Error(errorResponse?.error || errorResponse?.message || "Failed to create sale");
 }
 
 export const verifyPin = async (pin: string): Promise<any> => {

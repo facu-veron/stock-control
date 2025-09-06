@@ -9,8 +9,9 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
 import { Textarea } from "@/components/ui/textarea"
+import { Checkbox } from "@/components/ui/checkbox"
 import { toast } from "@/components/ui/use-toast"
-import { CheckCircle, AlertCircle, Info, Search, User } from "lucide-react"
+import { CheckCircle, AlertCircle, Info, Search, User, HelpCircle } from "lucide-react"
 import { 
   type Cliente,
   type TipoDocumento,
@@ -37,7 +38,7 @@ interface AgregarClienteMejoradoProps {
 }
 
 export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarClienteMejoradoProps) {
-  // ✅ Estado del formulario
+  // Estado del formulario
   const [cliente, setCliente] = React.useState<Partial<Cliente>>({
     tipoDocumento: 'DNI',
     condicionIVA: 'ConsumidorFinal',
@@ -50,24 +51,60 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
   const [errores, setErrores] = React.useState<Record<string, string>>({});
   const [cargando, setCargando] = React.useState(false);
   const [documentoFormateado, setDocumentoFormateado] = React.useState('');
+  const [sinDocumento, setSinDocumento] = React.useState(false); // NUEVO: para manejar CF
 
-  // ✅ Validación en tiempo real del documento
-  const validarDocumento = React.useCallback((numero: string, tipo: TipoDocumento) => {
+  // NUEVO: Opciones mejoradas para tipos de documento según condición IVA
+  const getOpcionesDocumentoMejoradas = (condicion: CondicionIVA): Array<{value: TipoDocumento, label: string, description: string}> => {
+    switch (condicion) {
+      case 'ConsumidorFinal':
+        return [
+          { value: 'DNI', label: 'DNI', description: 'Para personas físicas con documento' },
+          { value: 'CF', label: 'Consumidor Final', description: 'Sin datos de documento (venta mostrador)' }
+        ];
+      case 'ResponsableInscripto':
+        return [
+          { value: 'CUIT', label: 'CUIT', description: 'Obligatorio para Responsables Inscriptos' }
+        ];
+      case 'Monotributo':
+        return [
+          { value: 'CUIT', label: 'CUIT', description: 'Recomendado para Monotributistas' },
+          { value: 'CUIL', label: 'CUIL', description: 'Alternativa válida' },
+          { value: 'DNI', label: 'DNI', description: 'Solo en casos especiales' }
+        ];
+      case 'Exento':
+        return [
+          { value: 'CUIT', label: 'CUIT', description: 'Para entidades exentas' },
+          { value: 'DNI', label: 'DNI', description: 'Para personas físicas exentas' }
+        ];
+      default:
+        return TIPO_DOCUMENTO_OPTIONS.map(opt => ({
+          value: opt.value,
+          label: opt.label,
+          description: 'Documento válido para esta condición'
+        }));
+    }
+  };
+
+  // NUEVO: Validación mejorada
+  const validarDocumento = React.useCallback((numero: string, tipo: TipoDocumento, esSinDocumento: boolean) => {
     const erroresTemp: Record<string, string> = {};
+    
+    // Si es CF (sin documento), no validar número
+    if (tipo === 'CF' || esSinDocumento) {
+      return erroresTemp;
+    }
     
     if (!numero) {
       erroresTemp.documento = 'El número de documento es requerido';
       return erroresTemp;
     }
 
-    // Validar longitud
     if (!validarLongitudDocumento(numero, tipo)) {
       const longitud = tipo === 'DNI' ? '7-8 dígitos' : '11 dígitos';
       erroresTemp.documento = `${tipo} debe tener ${longitud}`;
       return erroresTemp;
     }
 
-    // Validar dígito verificador para CUIT/CUIL
     if ((tipo === 'CUIT' || tipo === 'CUIL') && !validarDigitoVerificador(numero)) {
       erroresTemp.documento = `${tipo} inválido - dígito verificador incorrecto`;
       return erroresTemp;
@@ -76,72 +113,81 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
     return erroresTemp;
   }, []);
 
-  // ✅ Validación de compatibilidad condición IVA vs tipo documento
-  const validarCompatibilidad = React.useCallback((condicion: CondicionIVA, tipo: TipoDocumento) => {
-    if (!validarCompatibilidadDocumento(condicion, tipo)) {
-      return `${condicion} no es compatible con ${tipo}. Tipos válidos: ${DOCUMENTO_POR_CONDICION[condicion].join(', ')}`;
-    }
-    return null;
-  }, []);
-
-  // ✅ Efecto para auto-formatear documento
+  // Efectos
   React.useEffect(() => {
-    if (cliente.numeroDocumento && cliente.tipoDocumento) {
+    if (cliente.numeroDocumento && cliente.tipoDocumento && !sinDocumento) {
       const formateado = formatearDocumento(cliente.numeroDocumento, cliente.tipoDocumento);
       setDocumentoFormateado(formateado);
     } else {
       setDocumentoFormateado('');
     }
-  }, [cliente.numeroDocumento, cliente.tipoDocumento]);
+  }, [cliente.numeroDocumento, cliente.tipoDocumento, sinDocumento]);
 
-  // ✅ Efecto para validación automática
   React.useEffect(() => {
     const nuevosErrores: Record<string, string> = {};
 
     // Validar documento
-    if (cliente.numeroDocumento && cliente.tipoDocumento) {
-      const erroresDoc = validarDocumento(cliente.numeroDocumento, cliente.tipoDocumento);
+    if (cliente.tipoDocumento) {
+      const erroresDoc = validarDocumento(cliente.numeroDocumento || '', cliente.tipoDocumento, sinDocumento);
       Object.assign(nuevosErrores, erroresDoc);
     }
 
     // Validar compatibilidad
     if (cliente.condicionIVA && cliente.tipoDocumento) {
-      const errorCompatibilidad = validarCompatibilidad(cliente.condicionIVA, cliente.tipoDocumento);
-      if (errorCompatibilidad) {
-        nuevosErrores.compatibilidad = errorCompatibilidad;
+      if (!validarCompatibilidadDocumento(cliente.condicionIVA, cliente.tipoDocumento)) {
+        nuevosErrores.compatibilidad = `${cliente.condicionIVA} no es compatible con ${cliente.tipoDocumento}`;
       }
     }
 
     setErrores(nuevosErrores);
-  }, [cliente.numeroDocumento, cliente.tipoDocumento, cliente.condicionIVA, validarDocumento, validarCompatibilidad]);
+  }, [cliente.numeroDocumento, cliente.tipoDocumento, cliente.condicionIVA, sinDocumento, validarDocumento]);
 
-  // ✅ Manejar cambio de condición IVA (auto-sugerir tipo documento)
+  // MEJORADO: Manejar cambio de condición IVA
   const handleCondicionChange = (nuevaCondicion: CondicionIVA) => {
-    const tipoSugerido = DOCUMENTO_SUGERIDO[nuevaCondicion];
+    const opcionesDisponibles = getOpcionesDocumentoMejoradas(nuevaCondicion);
+    const tipoSugerido = opcionesDisponibles[0].value; // Primer opción como sugerida
     
     setCliente(prev => ({
       ...prev,
       condicionIVA: nuevaCondicion,
       tipoDocumento: tipoSugerido,
-      numeroDocumento: '' // Limpiar documento al cambiar condición
+      numeroDocumento: ''
     }));
+    
+    setSinDocumento(tipoSugerido === 'CF');
+
+    // Toast más específico
+    const mensaje = nuevaCondicion === 'ConsumidorFinal' 
+      ? 'Para Consumidor Final puedes usar DNI o venta sin documento (CF)'
+      : nuevaCondicion === 'ResponsableInscripto'
+      ? 'Responsables Inscriptos deben usar CUIT obligatoriamente'
+      : `Se sugiere usar ${tipoSugerido} para ${nuevaCondicion}`;
 
     toast({
-      title: "Tipo de documento sugerido",
-      description: `Para ${nuevaCondicion} se sugiere usar ${tipoSugerido}`,
+      title: "Tipo de documento actualizado",
+      description: mensaje,
     });
   };
 
-  // ✅ Manejar cambio de tipo documento
+  // MEJORADO: Manejar cambio de tipo documento
   const handleTipoDocumentoChange = (nuevoTipo: TipoDocumento) => {
     setCliente(prev => ({
       ...prev,
       tipoDocumento: nuevoTipo,
-      numeroDocumento: '' // Limpiar al cambiar tipo
+      numeroDocumento: nuevoTipo === 'CF' ? '0' : '' // CF usa número 0
     }));
+    
+    setSinDocumento(nuevoTipo === 'CF');
+    
+    if (nuevoTipo === 'CF') {
+      toast({
+        title: "Venta sin documento",
+        description: "El cliente aparecerá como 'Consumidor Final' en la factura",
+      });
+    }
   };
 
-  // ✅ Manejar cambio de número documento
+  // Manejar cambio de número documento
   const handleDocumentoChange = (valor: string) => {
     const limpio = limpiarDocumento(valor);
     setCliente(prev => ({
@@ -150,9 +196,28 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
     }));
   };
 
-  // ✅ Función para autocompletar desde AFIP (simulada)
+  // NUEVO: Toggle para venta sin documento
+  const handleSinDocumentoChange = (checked: boolean) => {
+    setSinDocumento(checked);
+    
+    if (checked) {
+      setCliente(prev => ({
+        ...prev,
+        tipoDocumento: 'CF',
+        numeroDocumento: '0'
+      }));
+    } else {
+      setCliente(prev => ({
+        ...prev,
+        tipoDocumento: 'DNI',
+        numeroDocumento: ''
+      }));
+    }
+  };
+
+  // Buscar en AFIP
   const buscarEnAFIP = async () => {
-    if (!cliente.numeroDocumento || !cliente.tipoDocumento) {
+    if (!cliente.numeroDocumento || !cliente.tipoDocumento || sinDocumento) {
       toast({
         title: "Error",
         description: "Ingrese un número de documento válido para buscar",
@@ -161,14 +226,13 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
       return;
     }
 
-    // TODO: Implementar llamada real a AFIP
     toast({
       title: "Función no implementada",
       description: "La búsqueda en AFIP estará disponible próximamente",
     });
   };
 
-  // ✅ Validación final antes de enviar
+  // Validación final
   const validarFormulario = (): boolean => {
     if (!cliente.razonSocial?.trim()) {
       toast({
@@ -191,7 +255,7 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
     return true;
   };
 
-  // ✅ Enviar formulario
+  // Enviar formulario
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     
@@ -200,31 +264,19 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
     setCargando(true);
 
     try {
-      // Mapear a formato legacy para compatibilidad con backend
       const documentTypeMapped = mapearADocumentTypeUI(cliente.tipoDocumento!) as DocumentTypeUI;
       const taxStatusMapped = mapearACondicionLegacy(cliente.condicionIVA!) as TaxConditionUI;
-      
-      console.log("🔍 Mapeo de tipos:", {
-        tipoDocumento: cliente.tipoDocumento,
-        documentTypeMapped,
-        condicionIVA: cliente.condicionIVA,
-        taxStatusMapped
-      });
       
       const clienteLegacy = {
         name: cliente.razonSocial!,
         documentType: documentTypeMapped,
-        documentNumber: cliente.numeroDocumento!,
+        documentNumber: sinDocumento ? '0' : cliente.numeroDocumento!,
         taxStatus: taxStatusMapped,
         email: cliente.email || '',
         address: cliente.direccion || '',
       };
 
-      console.log("🔍 Enviando cliente al API:", clienteLegacy);
-
-      // ✅ ¡AQUÍ ESTABA EL PROBLEMA! Faltaba la llamada al API
       const clienteCreado = await createCustomer(clienteLegacy);
-      console.log("✅ Cliente creado en BD:", clienteCreado);
       
       toast({
         title: "Cliente creado exitosamente",
@@ -233,7 +285,7 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
 
       onClienteCreado({
         tipoDocumento: cliente.tipoDocumento!,
-        numeroDocumento: cliente.numeroDocumento!,
+        numeroDocumento: sinDocumento ? '0' : cliente.numeroDocumento!,
         condicionIVA: cliente.condicionIVA!,
         razonSocial: cliente.razonSocial!,
         email: cliente.email || '',
@@ -241,16 +293,14 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
       });
 
     } catch (error) {
-      console.error("🚨 Error completo al crear cliente:", error);
-      console.error("🚨 Error stack:", error instanceof Error ? error.stack : "No stack");
+      console.error("Error al crear cliente:", error);
       
       let errorMessage = "Error desconocido";
       if (error instanceof Error) {
         errorMessage = error.message;
         
-        // Detectar si el cliente ya existe
         if (error.message.includes("Failed to create customer")) {
-          errorMessage = `Cliente con ${cliente.tipoDocumento} ${cliente.numeroDocumento} ya existe. Usa un documento diferente.`;
+          errorMessage = `Cliente con ${cliente.tipoDocumento} ${cliente.numeroDocumento} ya existe.`;
         }
       }
       
@@ -264,12 +314,15 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
     }
   };
 
-  // ✅ Determinar estado visual del campo documento
+  // Estado visual del documento
   const estadoDocumento = React.useMemo(() => {
+    if (sinDocumento || cliente.tipoDocumento === 'CF') return 'neutro';
     if (!cliente.numeroDocumento) return 'neutro';
     if (errores.documento || errores.compatibilidad) return 'error';
     return 'exito';
-  }, [cliente.numeroDocumento, errores]);
+  }, [cliente.numeroDocumento, errores, sinDocumento, cliente.tipoDocumento]);
+
+  const opcionesDocumento = getOpcionesDocumentoMejoradas(cliente.condicionIVA || 'ConsumidorFinal');
 
   return (
     <Card className="w-full max-w-2xl mx-auto">
@@ -286,7 +339,7 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
           
-          {/* ✅ Condición IVA */}
+          {/* Condición IVA */}
           <div className="space-y-2">
             <Label htmlFor="condicionIVA">Condición frente al IVA *</Label>
             <Select 
@@ -299,46 +352,83 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
               <SelectContent>
                 {CONDICION_IVA_OPTIONS.map(option => (
                   <SelectItem key={option.value} value={option.value}>
-                    {option.label}
+                    <div className="flex flex-col">
+                      <span>{option.label}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {AYUDA_POR_CONDICION[option.value]}
+                      </span>
+                    </div>
                   </SelectItem>
                 ))}
               </SelectContent>
             </Select>
+            
+            {/* NUEVO: Información contextual mejorada */}
             {cliente.condicionIVA && (
               <Alert>
                 <Info className="h-4 w-4" />
                 <AlertDescription>
-                  {AYUDA_POR_CONDICION[cliente.condicionIVA]}
+                  <strong>{cliente.condicionIVA}:</strong> {AYUDA_POR_CONDICION[cliente.condicionIVA]}
                 </AlertDescription>
               </Alert>
             )}
           </div>
 
-          {/* ✅ Tipo de Documento (auto-sugerido) */}
+          {/* NUEVO: Opción para venta sin documento (solo para Consumidor Final) */}
+          {cliente.condicionIVA === 'ConsumidorFinal' && (
+            <div className="space-y-3 p-4 bg-blue-50 rounded-lg border border-blue-200">
+              <div className="flex items-center space-x-2">
+                <Checkbox 
+                  id="sinDocumento" 
+                  checked={sinDocumento}
+                  onCheckedChange={handleSinDocumentoChange}
+                />
+                <Label htmlFor="sinDocumento" className="text-sm font-medium">
+                  Venta sin documento (mostrador)
+                </Label>
+                <HelpCircle className="h-4 w-4 text-blue-500" />
+              </div>
+              <p className="text-xs text-blue-600">
+                Para ventas rápidas sin recopilar datos del cliente. Aparecerá como "Consumidor Final" en la factura.
+              </p>
+            </div>
+          )}
+
+          {/* Tipo de Documento Mejorado */}
           <div className="space-y-2">
             <Label htmlFor="tipoDocumento">Tipo de Documento *</Label>
-            <div className="flex gap-2 items-center">
-              <Select 
-                value={cliente.tipoDocumento} 
-                onValueChange={handleTipoDocumentoChange}
-              >
-                <SelectTrigger className="flex-1">
-                  <SelectValue placeholder="Seleccione tipo" />
-                </SelectTrigger>
-                <SelectContent>
-                  {TIPO_DOCUMENTO_OPTIONS
-                    .filter(opt => !cliente.condicionIVA || DOCUMENTO_POR_CONDICION[cliente.condicionIVA].includes(opt.value))
-                    .map(option => (
-                      <SelectItem key={option.value} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                </SelectContent>
-              </Select>
+            <Select 
+              value={cliente.tipoDocumento} 
+              onValueChange={handleTipoDocumentoChange}
+              disabled={sinDocumento}
+            >
+              <SelectTrigger className={sinDocumento ? "opacity-50" : ""}>
+                <SelectValue placeholder="Seleccione tipo" />
+              </SelectTrigger>
+              <SelectContent>
+                {opcionesDocumento.map(option => (
+                  <SelectItem key={option.value} value={option.value}>
+                    <div className="flex flex-col">
+                      <span>{option.label}</span>
+                      <span className="text-xs text-muted-foreground">
+                        {option.description}
+                      </span>
+                    </div>
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            
+            {/* Badges informativos */}
+            <div className="flex gap-2">
               {cliente.condicionIVA && cliente.tipoDocumento === DOCUMENTO_SUGERIDO[cliente.condicionIVA] && (
-                <Badge variant="secondary">Sugerido</Badge>
+                <Badge variant="secondary">Recomendado</Badge>
+              )}
+              {cliente.tipoDocumento === 'CF' && (
+                <Badge variant="outline">Sin documento</Badge>
               )}
             </div>
+            
             {errores.compatibilidad && (
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
@@ -347,88 +437,102 @@ export function AgregarClienteMejorado({ onClienteCreado, onCancelar }: AgregarC
             )}
           </div>
 
-          {/* ✅ Número de Documento */}
-          <div className="space-y-2">
-            <Label htmlFor="numeroDocumento">Número de Documento *</Label>
-            <div className="flex gap-2">
-              <div className="flex-1 space-y-1">
-                <Input
-                  id="numeroDocumento"
-                  value={documentoFormateado}
-                  onChange={(e) => handleDocumentoChange(e.target.value)}
-                  placeholder={
-                    cliente.tipoDocumento === 'DNI' ? "12.345.678" :
-                    cliente.tipoDocumento === 'CUIT' ? "30-12345678-9" :
-                    cliente.tipoDocumento === 'CUIL' ? "20-12345678-9" :
-                    "Número de documento"
-                  }
-                  className={
-                    estadoDocumento === 'error' ? 'border-red-500' :
-                    estadoDocumento === 'exito' ? 'border-green-500' : ''
-                  }
-                />
-                {estadoDocumento === 'exito' && (
-                  <div className="flex items-center gap-1 text-green-600 text-sm">
-                    <CheckCircle className="h-3 w-3" />
-                    Documento válido
-                  </div>
-                )}
-                {errores.documento && (
-                  <div className="flex items-center gap-1 text-red-600 text-sm">
-                    <AlertCircle className="h-3 w-3" />
-                    {errores.documento}
-                  </div>
-                )}
+          {/* Número de Documento */}
+          {!sinDocumento && cliente.tipoDocumento !== 'CF' && (
+            <div className="space-y-2">
+              <Label htmlFor="numeroDocumento">Número de Documento *</Label>
+              <div className="flex gap-2">
+                <div className="flex-1 space-y-1">
+                  <Input
+                    id="numeroDocumento"
+                    value={documentoFormateado}
+                    onChange={(e) => handleDocumentoChange(e.target.value)}
+                    placeholder={
+                      cliente.tipoDocumento === 'DNI' ? "12.345.678" :
+                      cliente.tipoDocumento === 'CUIT' ? "30-12345678-9" :
+                      cliente.tipoDocumento === 'CUIL' ? "20-12345678-9" :
+                      "Número de documento"
+                    }
+                    className={
+                      estadoDocumento === 'error' ? 'border-red-500' :
+                      estadoDocumento === 'exito' ? 'border-green-500' : ''
+                    }
+                  />
+                  {estadoDocumento === 'exito' && (
+                    <div className="flex items-center gap-1 text-green-600 text-sm">
+                      <CheckCircle className="h-3 w-3" />
+                      Documento válido
+                    </div>
+                  )}
+                  {errores.documento && (
+                    <div className="flex items-center gap-1 text-red-600 text-sm">
+                      <AlertCircle className="h-3 w-3" />
+                      {errores.documento}
+                    </div>
+                  )}
+                </div>
+                <Button 
+                  type="button" 
+                  variant="outline" 
+                  size="icon"
+                  onClick={buscarEnAFIP}
+                  disabled={estadoDocumento !== 'exito'}
+                  title="Buscar datos en AFIP"
+                >
+                  <Search className="h-4 w-4" />
+                </Button>
               </div>
-              <Button 
-                type="button" 
-                variant="outline" 
-                size="icon"
-                onClick={buscarEnAFIP}
-                disabled={estadoDocumento !== 'exito'}
-                title="Buscar datos en AFIP"
-              >
-                <Search className="h-4 w-4" />
-              </Button>
             </div>
-          </div>
+          )}
 
-          {/* ✅ Razón Social */}
+          {/* Razón Social */}
           <div className="space-y-2">
-            <Label htmlFor="razonSocial">Razón Social / Nombre *</Label>
+            <Label htmlFor="razonSocial">
+              {cliente.condicionIVA === 'ResponsableInscripto' ? 'Razón Social *' : 'Nombre / Razón Social *'}
+            </Label>
             <Input
               id="razonSocial"
               value={cliente.razonSocial}
               onChange={(e) => setCliente(prev => ({ ...prev, razonSocial: e.target.value }))}
-              placeholder="Nombre completo o razón social"
+              placeholder={
+                cliente.condicionIVA === 'ResponsableInscripto' 
+                  ? "Razón social de la empresa"
+                  : sinDocumento
+                  ? "Cliente de mostrador"
+                  : "Nombre completo o razón social"
+              }
             />
           </div>
 
-          {/* ✅ Email */}
-          <div className="space-y-2">
-            <Label htmlFor="email">Email</Label>
-            <Input
-              id="email"
-              type="email"
-              value={cliente.email}
-              onChange={(e) => setCliente(prev => ({ ...prev, email: e.target.value }))}
-              placeholder="email@ejemplo.com"
-            />
-          </div>
+          {/* Email - Solo si no es venta sin documento */}
+          {!sinDocumento && (
+            <div className="space-y-2">
+              <Label htmlFor="email">Email</Label>
+              <Input
+                id="email"
+                type="email"
+                value={cliente.email}
+                onChange={(e) => setCliente(prev => ({ ...prev, email: e.target.value }))}
+                placeholder="email@ejemplo.com"
+              />
+            </div>
+          )}
 
-          {/* ✅ Dirección */}
-          <div className="space-y-2">
-            <Label htmlFor="direccion">Dirección</Label>
-            <Textarea
-              id="direccion"
-              value={cliente.direccion}
-              onChange={(e) => setCliente(prev => ({ ...prev, direccion: e.target.value }))}
-              placeholder="Dirección completa"
-              rows={3}
-            />
-          </div>
+          {/* Dirección - Solo si no es venta sin documento */}
+          {!sinDocumento && (
+            <div className="space-y-2">
+              <Label htmlFor="direccion">Dirección</Label>
+              <Textarea
+                id="direccion"
+                value={cliente.direccion}
+                onChange={(e) => setCliente(prev => ({ ...prev, direccion: e.target.value }))}
+                placeholder="Dirección completa"
+                rows={3}
+              />
+            </div>
+          )}
 
-          {/* ✅ Acciones */}
+          {/* Acciones */}
           <div className="flex gap-2 pt-4">
             <Button 
               type="submit" 

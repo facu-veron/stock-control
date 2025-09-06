@@ -1,10 +1,10 @@
 // ✅ TIPOS MEJORADOS PARA CLIENTE AFIP según requerimientos
 
-export type TipoDocumento = 'CUIT' | 'DNI' | 'CUIL';
+export type TipoDocumento = 'CUIT' | 'DNI' | 'CUIL' | 'CF';
 
 export type CondicionIVA = 
   | 'ResponsableInscripto'
-  | 'Monotributista' 
+  | 'Monotributo' 
   | 'ConsumidorFinal'
   | 'Exento'
   | 'NoAlcanzado'
@@ -26,8 +26,8 @@ export interface Cliente {
 // ✅ MAPEO DE CONDICIONES IVA A TIPOS DE DOCUMENTO VÁLIDOS
 export const DOCUMENTO_POR_CONDICION: Record<CondicionIVA, TipoDocumento[]> = {
   'ResponsableInscripto': ['CUIT'],
-  'Monotributista': ['CUIT', 'CUIL'],
-  'ConsumidorFinal': ['DNI'],
+  'Monotributo': ['CUIT', 'CUIL'],
+  'ConsumidorFinal': ['DNI', 'CF'],
   'Exento': ['CUIT'],
   'NoAlcanzado': ['DNI', 'CUIT'],
   'Proveedor': ['CUIT'],
@@ -40,7 +40,7 @@ export const DOCUMENTO_POR_CONDICION: Record<CondicionIVA, TipoDocumento[]> = {
 // ✅ AUTO-SUGERENCIA: Tipo de documento preferido por condición
 export const DOCUMENTO_SUGERIDO: Record<CondicionIVA, TipoDocumento> = {
   'ResponsableInscripto': 'CUIT',
-  'Monotributista': 'CUIT',
+  'Monotributo': 'CUIT',
   'ConsumidorFinal': 'DNI', 
   'Exento': 'CUIT',
   'NoAlcanzado': 'DNI',
@@ -54,7 +54,7 @@ export const DOCUMENTO_SUGERIDO: Record<CondicionIVA, TipoDocumento> = {
 // ✅ LABELS PARA UI
 export const CONDICION_IVA_LABELS: Record<CondicionIVA, string> = {
   'ResponsableInscripto': 'Responsable Inscripto',
-  'Monotributista': 'Monotributista',
+  'Monotributo': 'Monotributo',
   'ConsumidorFinal': 'Consumidor Final',
   'Exento': 'Exento',
   'NoAlcanzado': 'No Alcanzado',
@@ -67,14 +67,15 @@ export const CONDICION_IVA_LABELS: Record<CondicionIVA, string> = {
 
 export const TIPO_DOCUMENTO_LABELS: Record<TipoDocumento, string> = {
   'CUIT': 'CUIT',
-  'CUIL': 'CUIL',
+  'CUIL': 'CUIL', 
   'DNI': 'DNI',
+  'CF': 'Consumidor Final',
 };
 
 // ✅ AYUDA CONTEXTUAL
 export const AYUDA_POR_CONDICION: Record<CondicionIVA, string> = {
   'ResponsableInscripto': 'Empresas y profesionales inscriptos en IVA. Requiere CUIT de 11 dígitos.',
-  'Monotributista': 'Pequeños contribuyentes. Pueden usar CUIT o CUIL de 11 dígitos.',
+  'Monotributo': 'Pequeños contribuyentes. Pueden usar CUIT o CUIL de 11 dígitos.',
   'ConsumidorFinal': 'Personas físicas que no realizan actividad comercial. Requiere DNI de 7-8 dígitos.',
   'Exento': 'Entidades exentas del pago de IVA. Requiere CUIT de 11 dígitos.',
   'NoAlcanzado': 'Actividades no alcanzadas por IVA. Puede usar DNI o CUIT.',
@@ -162,7 +163,8 @@ export function mapearADocumentTypeUI(tipo: TipoDocumento): string {
   const mapeo = {
     'CUIT': 'CUIT',
     'CUIL': 'CUIL', 
-    'DNI': 'DNI'
+    'DNI': 'DNI',
+    'CF': 'CF'
   };
   return mapeo[tipo];
 }
@@ -170,7 +172,7 @@ export function mapearADocumentTypeUI(tipo: TipoDocumento): string {
 export function mapearACondicionLegacy(condicion: CondicionIVA): string {
   const mapeo = {
     'ResponsableInscripto': 'RESPONSABLE_INSCRIPTO',
-    'Monotributista': 'MONOTRIBUTO',
+    'Monotributo': 'MONOTRIBUTO',
     'ConsumidorFinal': 'CONSUMIDOR_FINAL',
     'Exento': 'EXENTO',
     'NoAlcanzado': 'NO_ALCANZADO',

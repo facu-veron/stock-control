@@ -128,29 +128,43 @@ export function validateInvoiceTypeForCustomer(
     return { valid: true }; // Tickets son válidos para todos
   }
   
-  // Factura A solo para responsables inscriptos
-  if (invoiceType === 'FACTURA_A' && taxStatus !== 'RESPONSABLE_INSCRIPTO') {
-    return {
-      valid: false,
-      error: 'Factura A solo se puede emitir a Responsables Inscriptos'
-    };
+  // ✅ REGLAS AFIP ARGENTINA para Responsable Inscripto (emisor) → receptor:
+  
+  // FACTURA_A: Solo a otros Responsables Inscriptos
+  if (invoiceType === 'FACTURA_A') {
+    if (taxStatus === 'RESPONSABLE_INSCRIPTO') {
+      return { valid: true };
+    } else {
+      return {
+        valid: false,
+        error: 'Factura A se emite solo entre Responsables Inscriptos'
+      };
+    }
   }
   
-  // Factura B para monotributo y exentos
-  if (invoiceType === 'FACTURA_B' && !['MONOTRIBUTO', 'EXENTO'].includes(taxStatus)) {
-    return {
-      valid: false,
-      error: 'Factura B se emite a Monotributistas y Exentos'
-    };
+  // FACTURA_B: A Monotributo y Exentos
+  if (invoiceType === 'FACTURA_B') {
+    if (['MONOTRIBUTO', 'EXENTO'].includes(taxStatus)) {
+      return { valid: true };
+    } else {
+      return {
+        valid: false,
+        error: 'Factura B se emite a Monotributistas y Exentos'
+      };
+    }
   }
   
-  // Factura C para consumidores finales
-  if (invoiceType === 'FACTURA_C' && taxStatus !== 'CONSUMIDOR_FINAL') {
-    return {
-      valid: false,
-      error: 'Factura C se emite a Consumidores Finales'
-    };
+  // FACTURA_C: A Consumidor Final
+  if (invoiceType === 'FACTURA_C') {
+    if (taxStatus === 'CONSUMIDOR_FINAL') {
+      return { valid: true };
+    } else {
+      return {
+        valid: false,
+        error: 'Factura C se emite a Consumidores Finales'
+      };
+    }
   }
   
-  return { valid: true };
+  return { valid: false, error: 'Tipo de factura no válido' };
 }

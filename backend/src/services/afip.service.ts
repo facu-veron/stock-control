@@ -337,22 +337,54 @@ export class AfipService {
       const result: any = await afip.electronicBillingService.createVoucher(voucherData);
       console.log("✅ Respuesta de AFIP:", result);
 
-      // La librería puede devolver diferentes formatos, extraer datos
+      // ✅ MANEJO MEJORADO DE RESPUESTAS AFIP
       let cae = "";
       let caeFchVto = "";
-      let resultado = "A";
+      let resultado = "R";
+      let observaciones: any[] = [];
+      let errores: any[] = [];
 
-      if (result.cae || result.CAE) {
-        // Formato simple de la librería
-        cae = result.cae || result.CAE;
+      if (result && result.response) {
+        // Extraer resultado general
+        resultado = result.response.FeCabResp?.Resultado || "R";
+        
+        // Extraer errores si existen
+        if (result.response.Errors?.Err) {
+          errores = Array.isArray(result.response.Errors.Err) 
+            ? result.response.Errors.Err 
+            : [result.response.Errors.Err];
+          console.error("❌ Errores AFIP:", errores);
+        }
+
+        // Extraer observaciones si existen
+        if (result.response.FeDetResp?.FECAEDetResponse?.[0]?.Observaciones?.Obs) {
+          observaciones = Array.isArray(result.response.FeDetResp.FECAEDetResponse[0].Observaciones.Obs)
+            ? result.response.FeDetResp.FECAEDetResponse[0].Observaciones.Obs
+            : [result.response.FeDetResp.FECAEDetResponse[0].Observaciones.Obs];
+          console.warn("⚠️ Observaciones AFIP:", observaciones);
+        }
+
+        // Solo extraer CAE si el resultado es 'A' (Aprobado)
+        if (resultado === "A") {
+          const detResp = result.response.FeDetResp?.FECAEDetResponse?.[0] || {};
+          cae = detResp.CAE || "";
+          caeFchVto = detResp.CAEFchVto || "";
+          console.log("✅ CAE obtenido:", { cae, caeFchVto });
+        } else {
+          console.error("❌ Factura rechazada por AFIP. Resultado:", resultado);
+          await this.diagnoseAfipError(tenantId, result);
+          if (errores.length > 0) {
+            const errorMessages = errores.map((err: any) => `${err.Code}: ${err.Msg}`).join(", ");
+            throw new Error(`Factura rechazada por AFIP: ${errorMessages}`);
+          } else {
+            throw new Error(`Factura rechazada por AFIP. Resultado: ${resultado}`);
+          }
+        }
+      } else {
+        // Formato directo sin wrapper 'response'
+        cae = result.cae || result.CAE || "";
         caeFchVto = result.caeFchVto || result.CAEFchVto || "";
-      } else if (result.response || result.FeDetResp) {
-        // Formato complejo de respuesta
-        const response = result.response || result;
-        const detResp = response.FeDetResp?.FECAEDetResponse?.[0] || {};
-        cae = detResp.CAE || detResp.cae || "";
-        caeFchVto = detResp.CAEFchVto || detResp.caeFchVto || "";
-        resultado = detResp.Resultado || detResp.resultado || "R";
+        resultado = result.resultado || result.Resultado || (cae ? "A" : "R");
       }
 
       const invoiceResponse: AfipInvoiceResponse = {
@@ -360,18 +392,20 @@ export class AfipService {
         caeFchVto,
         cbteNumero: nextNumber,
         resultado,
-        observaciones: result.observaciones || [],
-        errores: result.errores || [],
+        observaciones,
+        errores,
       };
 
-      // Guardar en base de datos
-      await this.saveInvoiceToDatabase(tenantId, {
-        ptoVta: invoiceData.ptoVta,
-        cbteTipo: invoiceData.cbteTipo,
-        cbteNumero: nextNumber,
-        cae,
-        caeFchVto,
-      });
+      // Guardar en base de datos solo si fue aprobado
+      if (resultado === "A" && cae) {
+        await this.saveInvoiceToDatabase(tenantId, {
+          ptoVta: invoiceData.ptoVta,
+          cbteTipo: invoiceData.cbteTipo,
+          cbteNumero: nextNumber,
+          cae,
+          caeFchVto,
+        });
+      }
 
       return invoiceResponse;
     } catch (error) {
@@ -548,6 +582,42 @@ export class AfipService {
       console.log("💾 Guardando factura en BD:", invoiceData);
     } catch (error) {
       console.error("❌ Error guardando factura en BD:", error);
+    }
+  }
+
+  /**
+   * Método auxiliar para diagnosticar errores AFIP
+   */
+  async diagnoseAfipError(tenantId: string, response: any): Promise<void> {
+    console.log("🔍 DIAGNÓSTICO AFIP - Respuesta completa:", JSON.stringify(response, null, 2));
+    
+    if (response?.response?.Errors?.Err) {
+      const errors = Array.isArray(response.response.Errors.Err) 
+        ? response.response.Errors.Err 
+        : [response.response.Errors.Err];
+      
+      console.log("❌ ERRORES AFIP DETECTADOS:");
+      errors.forEach((error: any, index: number) => {
+        console.log(`  ${index + 1}. Código: ${error.Code}, Mensaje: ${error.Msg}`);
+      });
+    }
+
+    if (response?.response?.FeDetResp?.FECAEDetResponse?.[0]?.Observaciones?.Obs) {
+      const obs = response.response.FeDetResp.FECAEDetResponse[0].Observaciones.Obs;
+      const observations = Array.isArray(obs) ? obs : [obs];
+      
+      console.log("⚠️ OBSERVACIONES AFIP:");
+      observations.forEach((obs: any, index: number) => {
+        console.log(`  ${index + 1}. Código: ${obs.Code}, Mensaje: ${obs.Msg}`);
+      });
+    }
+
+    // Verificar credenciales
+    try {
+      const status = await this.getServerStatus(tenantId);
+      console.log("🔗 Estado servidor AFIP:", status);
+    } catch (error) {
+      console.error("❌ Error verificando estado AFIP:", error);
     }
   }
 }

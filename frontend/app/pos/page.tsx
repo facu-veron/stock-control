@@ -2,7 +2,7 @@ import type { Metadata } from "next"
 import { MainNav } from "@/components/main-nav"
 import { UserNav } from "@/components/user-nav"
 import { Search } from "@/components/search"
-import { PosInterface } from "@/components/pos/pos-interface"
+import PosInterface from "@/components/pos/pos-interface"
 import { RoleGuard } from "@/components/auth/role-guard"
 
 export const metadata: Metadata = {

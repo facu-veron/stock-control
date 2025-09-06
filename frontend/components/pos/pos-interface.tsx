@@ -49,10 +49,11 @@ export type InvoiceData = StandardizedInvoiceData
 // Estados del proceso de facturación
 type PosState = "cart" | "pre-invoice" | "pin-verification" | "processing" | "success" | "error"
 
-export function PosInterface() {
+export default function PosInterface() {
+  // ✅ Hook de manejo de errores (debe estar dentro del componente)
+  const { handleError } = useErrorHandler();
   const router = useRouter()
   const { user, logout } = useAuthStore()
-  const { handleError } = useErrorHandler() // ✅ Usar el hook de manejo de errores
   const [state, setState] = React.useState<PosState>("cart")
   const [cart, setCart] = React.useState<CartItem[]>([])
   const [customer, setCustomer] = React.useState<Customer | null>(null)
@@ -94,10 +95,10 @@ export function PosInterface() {
       const validation = validateInvoiceTypeForCustomer(suggestedType, standardizedTaxStatus);
       if (!validation.valid) {
         console.warn("Tipo de factura no compatible:", validation.error);
-        setInvoiceType("FACTURA_B"); // Fallback seguro
+        setInvoiceType("FACTURA_A"); // Fallback más seguro para RI
       }
     } else {
-      setInvoiceType("FACTURA_B")
+      setInvoiceType("TICKET") // Sin cliente = ticket
     }
   }, [customer, documentType])
 
@@ -221,7 +222,13 @@ export function PosInterface() {
       }
 
       // Validar compatibilidad del tipo de factura
-      const compatibility = validateInvoiceTypeForCustomer(invoiceType, customer.taxStatus);
+      // ✅ Normalizar el taxStatus antes de validar (igual que en useEffect)
+      const standardizedTaxStatus = typeof customer.taxStatus === 'string' 
+        ? convertLegacyTaxStatus(customer.taxStatus) || customer.taxStatus as TaxConditionUI
+        : customer.taxStatus;
+        
+      const compatibility = validateInvoiceTypeForCustomer(invoiceType, standardizedTaxStatus);
+      
       if (!compatibility.valid) {
         toast({
           title: "Tipo de factura incompatible",
@@ -372,23 +379,37 @@ export function PosInterface() {
       setState("success")
     } catch (error: any) {
       console.error("🚨 Error original en confirmInvoice:", error);
-      console.error("🚨 Stack trace:", error?.stack);
-      console.error("🚨 Error message:", error?.message);
-      console.error("🚨 Error type:", typeof error);
       
-      try {
-        // ✅ Usar el manejador de errores centralizado
-        const { error: parsedError, recovery } = handleError(error);
-        setErrorMessage(parsedError.userMessage);
-        
-        console.log("✅ Error parseado:", {
-          originalError: error,
-          parsedError,
-          recovery,
+      // ✅ Usar el manejador de errores centralizado  
+      const { error: parsedError, recovery } = handleError(error);
+      
+      console.log("Error capturado:", {
+        originalError: error,
+        parsedError,
+        recovery,
+      });
+      
+      console.log("✅ Error parseado:", {
+        originalError: error,
+        parsedError,
+        recovery,
+      });
+      
+      setErrorMessage(parsedError.userMessage);
+      
+      // Mostrar toast con información de recuperación si está disponible
+      if (recovery && recovery.action === 'retry') {
+        toast({
+          title: "Error temporal",
+          description: `${parsedError.userMessage}\n${recovery.suggestion}`,
+          variant: "destructive",
         });
-      } catch (handlerError) {
-        console.error("🚨 Error en el handler de errores:", handlerError);
-        setErrorMessage(error?.message || "Error desconocido al procesar la venta");
+      } else {
+        toast({
+          title: "Error en la venta",
+          description: parsedError.userMessage,
+          variant: "destructive",
+        });
       }
       
       setState("error")
