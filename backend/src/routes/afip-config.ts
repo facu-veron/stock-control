@@ -251,6 +251,8 @@ router.get(
         orderBy: { ptoVta: "asc" }
       });
 
+      console.log("🔍 Puntos de venta desde BD:", pointsOfSale);
+
       return res.json({
         success: true,
         pointsOfSale
@@ -258,8 +260,61 @@ router.get(
     } catch (error) {
       console.error("Error obteniendo puntos de venta:", error);
       return res.status(500).json({ 
-        success: false, 
+        success: false,
         error: "Error obteniendo puntos de venta" 
+      });
+    }
+  }
+);
+
+/**
+ * POST /api/afip/points-of-sale/create-test
+ * Crea un punto de venta de prueba (temporal para desarrollo)
+ */
+router.post(
+  "/points-of-sale/create-test",
+  authenticateToken,
+  async (req: AuthenticatedRequest, res) => {
+    const tenantId = req.user!.tenantId;
+
+    try {
+      // Crear algunos puntos de venta de prueba
+      const testPoints = [
+        { ptoVta: 1, description: "Punto de Venta Principal", active: true },
+        { ptoVta: 2, description: "Punto de Venta Sucursal", active: true },
+        { ptoVta: 3, description: "Punto de Venta Online", active: false },
+      ];
+
+      const createdPoints = [];
+
+      for (const point of testPoints) {
+        const existingPoint = await prisma.afipPointOfSale.findUnique({
+          where: { tenantId_ptoVta: { tenantId, ptoVta: point.ptoVta } }
+        });
+
+        if (!existingPoint) {
+          const newPoint = await prisma.afipPointOfSale.create({
+            data: {
+              tenantId,
+              ptoVta: point.ptoVta,
+              description: point.description,
+              active: point.active,
+            }
+          });
+          createdPoints.push(newPoint);
+        }
+      }
+
+      return res.json({
+        success: true,
+        message: `${createdPoints.length} puntos de venta creados`,
+        pointsOfSale: createdPoints
+      });
+    } catch (error) {
+      console.error("Error creando puntos de venta de prueba:", error);
+      return res.status(500).json({
+        success: false,
+        error: "Error creando puntos de venta de prueba"
       });
     }
   }

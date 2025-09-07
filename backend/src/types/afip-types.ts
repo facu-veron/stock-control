@@ -142,28 +142,24 @@ export function validateInvoiceTypeForCustomer(
     }
   }
   
-  // FACTURA_B: A Monotributo y Exentos
+  // FACTURA_B: De Responsable Inscripto a Consumidor Final, Monotributo, Exento, No Categorizado
   if (invoiceType === 'FACTURA_B') {
-    if (['MONOTRIBUTO', 'EXENTO'].includes(taxStatus)) {
+    if (['MONOTRIBUTO', 'EXENTO', 'CONSUMIDOR_FINAL', 'NO_CATEGORIZADO'].includes(taxStatus)) {
       return { valid: true };
     } else {
       return {
         valid: false,
-        error: 'Factura B se emite a Monotributistas y Exentos'
+        error: 'Factura B se emite desde Responsable Inscripto a Monotributistas, Exentos, Consumidores Finales y No Categorizados'
       };
     }
   }
   
-  // FACTURA_C: A Consumidor Final
+  // FACTURA_C: Solo para Monotributo EMISOR (no aplica para Responsable Inscripto)
   if (invoiceType === 'FACTURA_C') {
-    if (taxStatus === 'CONSUMIDOR_FINAL') {
-      return { valid: true };
-    } else {
-      return {
-        valid: false,
-        error: 'Factura C se emite a Consumidores Finales'
-      };
-    }
+    return {
+      valid: false,
+      error: 'Factura C solo puede ser emitida por Monotributistas, no por Responsables Inscriptos'
+    };
   }
   
   return { valid: false, error: 'Tipo de factura no válido' };

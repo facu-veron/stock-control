@@ -638,3 +638,71 @@ export const deleteCustomer = async (id: string): Promise<void> => {
     throw new Error(response.error || "Failed to delete customer");
   }
 };
+
+// ✅ PUNTOS DE VENTA
+export const getSalesPoints = async (): Promise<any[]> => {
+  try {
+    const response = await fetchApi<any>("/afip/points-of-sale", {
+      method: "GET",
+    });
+    
+    // Cast para acceder a propiedades específicas
+    const responseData = response as any;
+    
+    // Verificar estructura de respuesta del backend
+    if (responseData && responseData.success && Array.isArray(responseData.pointsOfSale)) {
+      return responseData.pointsOfSale;
+    } else if (responseData && Array.isArray(responseData.data)) {
+      return responseData.data;
+    } else if (Array.isArray(responseData)) {
+      return responseData;
+    }
+    
+    console.warn("⚠️ Respuesta de puntos de venta no es array:", responseData);
+    return [];
+  } catch (error) {
+    console.error("❌ Error obteniendo puntos de venta:", error);
+    return [];
+  }
+};
+
+export const syncSalesPoints = async (): Promise<{ success: boolean; message: string; data?: any }> => {
+  try {
+    const response = await fetchApi<any>("/afip/points-of-sale/sync", {
+      method: "POST",
+    });
+    return {
+      success: true,
+      message: "Puntos de venta sincronizados correctamente",
+      data: response.data || response
+    };
+  } catch (error) {
+    console.error("❌ Error sincronizando puntos de venta:", error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : "Error desconocido"
+    };
+  }
+};
+
+// ✅ TEMPORAL: Crear puntos de venta de prueba
+export const createTestSalesPoints = async (): Promise<{ success: boolean; message: string; data?: any }> => {
+  try {
+    const response = await fetchApi<any>("/afip/points-of-sale/create-test", {
+      method: "POST",
+    });
+    
+    const responseData = response as any;
+    return {
+      success: responseData.success || true,
+      message: responseData.message || "Puntos de venta de prueba creados",
+      data: responseData.pointsOfSale || responseData.data || response
+    };
+  } catch (error) {
+    console.error("❌ Error creando puntos de venta de prueba:", error);
+    return {
+      success: false,
+      message: error instanceof Error ? error.message : "Error desconocido"
+    };
+  }
+};

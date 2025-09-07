@@ -130,6 +130,8 @@ export function validateInvoiceTypeForCustomer(
   invoiceType: InvoiceTypeUI,
   customerTaxCondition?: TaxConditionUI
 ): { valid: boolean; error?: string } {
+  console.log(`🔍 Frontend validateInvoiceTypeForCustomer: ${invoiceType} para ${customerTaxCondition}`);
+  
   if (!customerTaxCondition || invoiceType === 'TICKET') {
     return { valid: true }; // Sin cliente o tickets siempre válidos
   }
@@ -140,8 +142,10 @@ export function validateInvoiceTypeForCustomer(
   // Factura A: Solo entre Responsables Inscriptos
   if (invoiceType === 'FACTURA_A') {
     if (customerTaxCondition === 'RESPONSABLE_INSCRIPTO') {
+      console.log(`✅ Frontend: FACTURA_A válida para RESPONSABLE_INSCRIPTO`);
       return { valid: true };
     } else {
+      console.log(`❌ Frontend: FACTURA_A inválida para ${customerTaxCondition}`);
       return {
         valid: false,
         error: 'Factura A se emite solo entre Responsables Inscriptos'
@@ -149,28 +153,26 @@ export function validateInvoiceTypeForCustomer(
     }
   }
   
-  // Factura B: A Monotributo y Exentos
+  // Factura B: De Responsable Inscripto a Monotributo, Exento, Consumidor Final, No Categorizado
   if (invoiceType === 'FACTURA_B') {
-    if (['MONOTRIBUTO', 'EXENTO'].includes(customerTaxCondition)) {
+    if (['MONOTRIBUTO', 'EXENTO', 'CONSUMIDOR_FINAL', 'NO_CATEGORIZADO'].includes(customerTaxCondition)) {
+      console.log(`✅ Frontend: FACTURA_B válida para ${customerTaxCondition}`);
       return { valid: true };
     } else {
+      console.log(`❌ Frontend: FACTURA_B inválida para ${customerTaxCondition}`);
       return {
         valid: false,
-        error: 'Factura B se emite a Monotributistas y Exentos'
+        error: 'Factura B se emite desde Responsable Inscripto a Monotributistas, Exentos, Consumidores Finales y No Categorizados'
       };
     }
   }
   
-  // Factura C: A Consumidores Finales
+  // Factura C: Solo para Monotributo EMISOR (no aplica para Responsables Inscriptos)
   if (invoiceType === 'FACTURA_C') {
-    if (customerTaxCondition === 'CONSUMIDOR_FINAL') {
-      return { valid: true };
-    } else {
-      return {
-        valid: false,
-        error: 'Factura C se emite a Consumidores Finales'
-      };
-    }
+    return {
+      valid: false,
+      error: 'Factura C solo puede ser emitida por Monotributistas, no por Responsables Inscriptos'
+    };
   }
   
   return { valid: false, error: 'Tipo de factura no válido' };
@@ -213,17 +215,24 @@ export function validateDocumentTypeForTaxCondition(
 // │ Responsable Inscripto       │ FACTURA_A    │     1       │ Entre RI (discrimina IVA)   │
 // │ Monotributista              │ FACTURA_B    │     6       │ RI → Monotributo            │
 // │ Exento                      │ FACTURA_B    │     6       │ RI → Exento                 │
-// │ Consumidor Final            │ FACTURA_C    │    11       │ RI → CF (IVA incluido)      │
-// │ No Categorizado             │ FACTURA_C    │    11       │ Similar a CF                │
+// │ Consumidor Final            │ FACTURA_B    │     6       │ RI → CF (IVA incluido) ✅   │
+// │ No Categorizado             │ FACTURA_B    │     6       │ Similar a CF ✅             │
 // │ Sin Cliente                 │ TICKET       │     -       │ Venta mostrador             │
 // └─────────────────────────────┴──────────────┴─────────────┴─────────────────────────────┘
 
 // ✅ DETERMINACIÓN AUTOMÁTICA DE TIPO DE FACTURA
 // IMPORTANTE: Esta función determina el tipo de factura que debe emitir
 // un RESPONSABLE INSCRIPTO (emisor) hacia diferentes tipos de receptores
+// 
+// REGLAS AFIP CORRECTAS:
+// - FACTURA_A (código 1): Responsable Inscripto → Responsable Inscripto
+// - FACTURA_B (código 6): Responsable Inscripto → Monotributo, Exento, Consumidor Final, No Categorizado
+// - FACTURA_C (código 11): Solo para Monotributo EMISOR (no aplica aquí)
 export function determineInvoiceTypeForCustomer(
   customerTaxCondition?: TaxConditionUI
 ): InvoiceTypeUI {
+  console.log(`🔍 Frontend determineInvoiceTypeForCustomer: ${customerTaxCondition}`);
+  
   if (!customerTaxCondition) {
     return 'TICKET';
   }
@@ -234,27 +243,31 @@ export function determineInvoiceTypeForCustomer(
   switch (customerTaxCondition) {
     case 'RESPONSABLE_INSCRIPTO':
       // RI → RI = Factura A (entre responsables inscriptos)
+      console.log(`✅ Frontend: RESPONSABLE_INSCRIPTO → FACTURA_A`);
       return 'FACTURA_A';
       
     case 'MONOTRIBUTO':
       // RI → Monotributo = Factura B ✅ (corregido)
+      console.log(`✅ Frontend: MONOTRIBUTO → FACTURA_B`);
       return 'FACTURA_B';
       
     case 'EXENTO':
       // RI → Exento = Factura B
+      console.log(`✅ Frontend: EXENTO → FACTURA_B`);
       return 'FACTURA_B';
       
     case 'CONSUMIDOR_FINAL':
-      // RI → Consumidor Final = Factura C
-      return 'FACTURA_C';
+      // RI → Consumidor Final = Factura B ✅ (CORREGIDO - era FACTURA_C)
+      console.log(`✅ Frontend: CONSUMIDOR_FINAL → FACTURA_B`);
+      return 'FACTURA_B';
       
     case 'NO_CATEGORIZADO':
-      // RI → No Categorizado = Factura C (tratamiento similar a CF)
-      return 'FACTURA_C';
+      // RI → No Categorizado = Factura B ✅ (CORREGIDO - era FACTURA_C)
+      return 'FACTURA_B';
       
     default:
-      // Para casos especiales, usar Factura C como más compatible
-      return 'FACTURA_C';
+      // Para casos especiales, usar Factura B como más compatible
+      return 'FACTURA_B';
   }
 }
 

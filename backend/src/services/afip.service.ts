@@ -121,7 +121,24 @@ export class AfipService {
     try {
       const afip = await this.getAfipInstance(tenantId);
       const salesPoints = await afip.electronicBillingService.getSalesPoints();
-      console.log("🔍 Puntos de venta recibidos:", salesPoints);
+      console.log("🔍 Puntos de venta recibidos:", JSON.stringify(salesPoints, null, 2));
+      
+      // Cast para acceder a propiedades
+      const result = salesPoints as any;
+      
+      // Verificar si hay errores en la respuesta
+      if (result && result.FEParamGetPtosVentaResult && result.FEParamGetPtosVentaResult.Errors) {
+        console.error("❌ Errores AFIP en puntos de venta:", result.FEParamGetPtosVentaResult.Errors);
+        return [];
+      }
+      
+      // Extraer los puntos de venta correctamente
+      if (result && result.FEParamGetPtosVentaResult && result.FEParamGetPtosVentaResult.PtoVenta) {
+        return Array.isArray(result.FEParamGetPtosVentaResult.PtoVenta) 
+          ? result.FEParamGetPtosVentaResult.PtoVenta 
+          : [result.FEParamGetPtosVentaResult.PtoVenta];
+      }
+      
       return Array.isArray(salesPoints) ? salesPoints : [];
     } catch (error) {
       console.error("❌ Error obteniendo puntos de venta:", error);
@@ -249,24 +266,43 @@ export class AfipService {
       return params.explicitId;
     }
     
-    if (params.taxStatus) {
-      try {
-        return convertTaxConditionUIToAfip(params.taxStatus);
-      } catch (error) {
-        console.warn(`⚠️ Estado fiscal no reconocido: ${params.taxStatus}`);
+    if (params.taxStatus && params.cbteTipo) {
+      // ✅ CORRECCIÓN CRÍTICA: Mapeo correcto para FACTURA_B según reglas AFIP
+      if (params.cbteTipo === AFIP_INVOICE_TYPES.FACTURA_B) {
+        switch (params.taxStatus) {
+          case 'MONOTRIBUTO':
+            // 🔄 MONOTRIBUTO en FACTURA_B debe ser CONSUMIDOR_FINAL (5), NO MONOTRIBUTO (6)
+            return AFIP_TAX_CONDITIONS.CONSUMIDOR_FINAL;
+          case 'EXENTO':
+            return AFIP_TAX_CONDITIONS.EXENTO;
+          case 'CONSUMIDOR_FINAL':
+            return AFIP_TAX_CONDITIONS.CONSUMIDOR_FINAL;
+          default:
+            return AFIP_TAX_CONDITIONS.CONSUMIDOR_FINAL;
+        }
+      } else if (params.cbteTipo === AFIP_INVOICE_TYPES.FACTURA_A) {
+        // FACTURA_A siempre es entre Responsables Inscriptos
+        return AFIP_TAX_CONDITIONS.RESPONSABLE_INSCRIPTO;
+      } else {
+        // Otros tipos: usar conversión directa
+        try {
+          return convertTaxConditionUIToAfip(params.taxStatus);
+        } catch (error) {
+          console.warn(`⚠️ Estado fiscal no reconocido: ${params.taxStatus}`);
+          return AFIP_TAX_CONDITIONS.CONSUMIDOR_FINAL;
+        }
       }
     }
 
-    // Heurística mejorada
+    // Heurística de fallback basada en tipo de documento
     if (params.docTipo === AFIP_DOCUMENT_TYPES.CF || params.docTipo === AFIP_DOCUMENT_TYPES.DNI) {
       return AFIP_TAX_CONDITIONS.CONSUMIDOR_FINAL;
     } else if (params.docTipo === AFIP_DOCUMENT_TYPES.CUIT) {
       if (params.cbteTipo === AFIP_INVOICE_TYPES.FACTURA_A) {
         return AFIP_TAX_CONDITIONS.RESPONSABLE_INSCRIPTO;
-      } else if (params.cbteTipo === AFIP_INVOICE_TYPES.FACTURA_B) {
-        return AFIP_TAX_CONDITIONS.MONOTRIBUTO;
       } else {
-        return AFIP_TAX_CONDITIONS.RESPONSABLE_INSCRIPTO;
+        // Para FACTURA_B con CUIT sin taxStatus, asumir CONSUMIDOR_FINAL
+        return AFIP_TAX_CONDITIONS.CONSUMIDOR_FINAL;
       }
     }
     
@@ -297,6 +333,8 @@ export class AfipService {
         docTipo: invoiceData.docTipo,
         cbteTipo: invoiceData.cbteTipo,
       });
+
+      console.log(`🔍 RESULTADO CondicionIVAReceptorId: ${condIVAId} para taxStatus: ${invoiceData.taxStatus}, cbteTipo: ${invoiceData.cbteTipo}`);
 
       // ✅ Preparar datos usando la estructura exacta de afip.ts
       const voucherData: any = {
@@ -428,6 +466,8 @@ export class AfipService {
         docTipo: invoiceData.docTipo,
         cbteTipo: invoiceData.cbteTipo,
       });
+
+      console.log(`🔍 RESULTADO CondicionIVAReceptorId: ${condIVAId} para taxStatus: ${invoiceData.taxStatus}, cbteTipo: ${invoiceData.cbteTipo}`);
 
       const voucherData: any = {
         CantReg: 1,

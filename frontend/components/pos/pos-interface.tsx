@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { toast } from "@/components/ui/use-toast"
 import { ProductSelector } from "@/components/pos/product-selector"
 // import { CustomerSelector } from "@/components/pos/customer-selector" // ✅ Reemplazado por formulario nuevo
+import { useSalesPoints, SalesPoint } from "@/hooks/use-sales-points"
 import { ClienteSelectorCompleto } from "@/components/pos/cliente-selector-completo"
 import { CartSummary } from "@/components/pos/cart-summary"
 import { PreInvoice } from "@/components/pos/pre-invoice"
@@ -19,6 +20,7 @@ import { PinVerification } from "@/components/pos/pin-verification"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { Badge } from "@/components/ui/badge"
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group"
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { Receipt, FileText, User, LogOut, ShoppingCart, Package, Clock } from "lucide-react"
 import { useAuthStore } from "@/stores/auth-store"
 import type { User as Employee, Customer, CreateSaleRequest } from "@/lib/api"
@@ -64,6 +66,25 @@ export default function PosInterface() {
   const [discount, setDiscount] = React.useState<number>(0)
   const [errorMessage, setErrorMessage] = React.useState<string>("")
   const [saleEmployee, setSaleEmployee] = React.useState<Employee | null>(null)
+  const [selectedSalesPoint, setSelectedSalesPoint] = React.useState<SalesPoint | null>(null)
+
+  // ✅ Hook para puntos de venta
+  const { 
+    salesPoints, 
+    loading: salesPointsLoading, 
+    error: salesPointsError, 
+    loadSalesPoints,
+    syncPoints,
+    getDefaultSalesPoint 
+  } = useSalesPoints();
+
+  // ✅ Seleccionar punto de venta por defecto
+  React.useEffect(() => {
+    if (!selectedSalesPoint && !salesPointsLoading && salesPoints.length > 0) {
+      const defaultPoint = getDefaultSalesPoint();
+      setSelectedSalesPoint(defaultPoint);
+    }
+  }, [salesPoints, salesPointsLoading, selectedSalesPoint, getDefaultSalesPoint]);
 
   // ✅ Funciones de mapeo movidas al componente ClienteSelectorCompleto
 
@@ -95,7 +116,7 @@ export default function PosInterface() {
       const validation = validateInvoiceTypeForCustomer(suggestedType, standardizedTaxStatus);
       if (!validation.valid) {
         console.warn("Tipo de factura no compatible:", validation.error);
-        setInvoiceType("FACTURA_A"); // Fallback más seguro para RI
+        setInvoiceType("FACTURA_B"); // Fallback más seguro para RI (CORREGIDO de FACTURA_A)
       }
     } else {
       setInvoiceType("TICKET") // Sin cliente = ticket
@@ -197,7 +218,7 @@ export default function PosInterface() {
       items: cart,
       customer: customer || undefined,
       invoiceType: documentType === "ticket" ? "TICKET" : invoiceType,
-      puntoVenta: documentType === "factura" ? 1 : undefined,
+      puntoVenta: documentType === "factura" ? selectedSalesPoint?.ptoVta : undefined,
     });
 
     if (validation) {
@@ -211,6 +232,15 @@ export default function PosInterface() {
 
     // ✅ Validación adicional específica para facturas
     if (documentType === "factura") {
+      if (!selectedSalesPoint) {
+        toast({
+          title: "Error de validación",
+          description: "Debe seleccionar un punto de venta para facturar",
+          variant: "destructive",
+        });
+        return;
+      }
+      
       if (!customer) {
         const error = VALIDATION_ERRORS.CUSTOMER_REQUIRED;
         toast({
@@ -305,7 +335,7 @@ export default function PosInterface() {
           discount: item.discount || 0,
         })),
         invoiceType: invoiceType, // ✅ Usar directamente el tipo tipado
-        puntoVenta: documentType === "factura" ? 1 : undefined, // ✅ Agregar punto de venta para facturas
+        puntoVenta: documentType === "factura" ? selectedSalesPoint?.ptoVta : undefined, // ✅ Usar punto de venta dinámico
         notes: undefined,
         discount: discount > 0 ? discount : undefined,
       }
@@ -626,6 +656,87 @@ export default function PosInterface() {
                       Factura
                     </ToggleGroupItem>
                   </ToggleGroup>
+
+                  {documentType === "factura" && (
+                    <div className="space-y-2">
+                      <label className="text-sm font-medium text-muted-foreground">
+                        Punto de Venta {salesPointsLoading && "(Cargando...)"}
+                      </label>
+                      <Select
+                        value={selectedSalesPoint?.ptoVta?.toString() || ""}
+                        onValueChange={(value) => {
+                          const point = salesPoints.find(p => p.ptoVta.toString() === value);
+                          setSelectedSalesPoint(point || null);
+                        }}
+                        disabled={salesPointsLoading}
+                      >
+                        <SelectTrigger>
+                          <SelectValue 
+                            placeholder={
+                              salesPointsLoading ? "Cargando..." :
+                              salesPoints.length === 0 ? "Sin puntos de venta disponibles" :
+                              "Seleccionar punto de venta"
+                            } 
+                          />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {salesPoints.length > 0 && salesPoints.filter(p => p.active).map((point) => (
+                            <SelectItem key={point.id} value={point.ptoVta?.toString() || point.id.toString()}>
+                              PV {(point.ptoVta || 0).toString().padStart(5, '0')} - {point.description || 'Sin descripción'}
+                            </SelectItem>
+                          ))}
+                          {salesPoints.filter(p => p.active).length === 0 && (
+                            <SelectItem value="no-points" disabled>
+                              No hay puntos de venta activos
+                            </SelectItem>
+                          )}
+                        </SelectContent>
+                      </Select>
+                      
+                      {salesPointsError && (
+                        <div className="text-sm text-destructive">
+                          {salesPointsError}
+                        </div>
+                      )}
+                      
+                      {salesPoints.filter(p => p.active).length === 0 && !salesPointsLoading && (
+                        <div className="space-y-2">
+                          <Button 
+                            variant="outline" 
+                            size="sm" 
+                            onClick={syncPoints}
+                            className="w-full"
+                          >
+                            Sincronizar con AFIP
+                          </Button>
+                          <Button 
+                            variant="secondary" 
+                            size="sm" 
+                            onClick={async () => {
+                              const { createTestSalesPoints } = await import('@/lib/api');
+                              const result = await createTestSalesPoints();
+                              if (result.success) {
+                                toast({
+                                  title: "Éxito",
+                                  description: result.message,
+                                });
+                                await loadSalesPoints();
+                              } else {
+                                toast({
+                                  title: "Error",
+                                  description: result.message,
+                                  variant: "destructive",
+                                });
+                              }
+                            }}
+                            className="w-full"
+                          >
+                            Crear Puntos de Prueba
+                          </Button>
+                        </div>
+                      )}
+                    </div>
+                  )}
 
                   {documentType === "factura" && (
                     <ClienteSelectorCompleto

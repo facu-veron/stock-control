@@ -16,6 +16,102 @@ import {
 const router = Router();
 
 /**
+ * GET /api/sales
+ * Obtiene el historial de ventas con paginación
+ */
+router.get("/", authenticateToken, async (req: AuthenticatedRequest, res: Response) => {
+  try {
+    const { tenantId } = req.user!;
+    const page = parseInt(req.query.page as string) || 1;
+    const limit = parseInt(req.query.limit as string) || 20;
+    const startDate = req.query.startDate as string;
+    const endDate = req.query.endDate as string;
+    const offset = (page - 1) * limit;
+
+    // Construir filtros de fecha
+    const dateFilter: any = {};
+    if (startDate || endDate) {
+      if (startDate) {
+        dateFilter.gte = new Date(startDate);
+      }
+      if (endDate) {
+        const endDateTime = new Date(endDate);
+        endDateTime.setHours(23, 59, 59, 999); // Incluir todo el día
+        dateFilter.lte = endDateTime;
+      }
+    }
+
+    const whereClause = {
+      tenantId,
+      ...(startDate || endDate ? { createdAt: dateFilter } : {})
+    };
+
+    // Obtener ventas con paginación
+    const [sales, totalCount] = await Promise.all([
+      prisma.sale.findMany({
+        where: whereClause,
+        include: {
+          customer: {
+            select: {
+              id: true,
+              name: true,
+              documentType: true,
+              documentNumber: true,
+              taxStatus: true,
+            }
+          },
+          employee: {
+            select: {
+              id: true,
+              name: true,
+            }
+          },
+          items: {
+            include: {
+              product: {
+                select: {
+                  id: true,
+                  name: true,
+                  price: true,
+                }
+              }
+            }
+          }
+        },
+        orderBy: {
+          createdAt: 'desc'
+        },
+        take: limit,
+        skip: offset,
+      }),
+      prisma.sale.count({ where: whereClause })
+    ]);
+
+    const totalPages = Math.ceil(totalCount / limit);
+
+    res.json({
+      success: true,
+      data: sales,
+      pagination: {
+        page,
+        limit,
+        totalCount,
+        totalPages,
+        hasNextPage: page < totalPages,
+        hasPrevPage: page > 1,
+      }
+    });
+
+  } catch (error) {
+    console.error("❌ Error obteniendo ventas:", error);
+    res.status(500).json({
+      success: false,
+      error: "Error interno del servidor al obtener ventas"
+    });
+  }
+});
+
+/**
  * POST /api/sales/validate-pin
  * Valida el PIN de un empleado para autorizar la venta
  */
@@ -289,13 +385,20 @@ router.post(
         return newSale;
       });
 
-      // ✅ PROCESAR FACTURACIÓN CON AFIP (simplificado)
+      // ✅ PROCESAR FACTURACIÓN CON AFIP (corregido para usar determinación automática)
       if (invoiceType !== "TICKET" && puntoVenta) {
         try {
+          // 🔄 CORRECCIÓN: Determinar automáticamente el tipo correcto basado en el cliente
+          const correctInvoiceType = customerData ? 
+            determineInvoiceTypeFromCustomer(customerData.taxStatus) : 
+            invoiceType as InvoiceTypeUI;
+
+          console.log(`🔄 Tipo original: ${invoiceType}, Tipo corregido: ${correctInvoiceType}`);
+
           const afipResponse = await afipService.procesarFacturacionFromSale({
             tenantId,
             sale: createdSale,
-            tipoFactura: invoiceType as InvoiceTypeUI,
+            tipoFactura: correctInvoiceType, // ✅ Usar el tipo corregido automáticamente
             puntoVenta,
             customer: customerData
           });
@@ -562,19 +665,23 @@ router.post(
 
 /**
  * Helper function para determinar tipo de factura
+ * REGLAS AFIP: Responsable Inscripto (EMISOR) puede emitir:
+ * - FACTURA_A (código 1) → a Responsables Inscriptos  
+ * - FACTURA_B (código 6) → a Consumidor Final, Monotributo, Exento, No Categorizado
+ * - NO puede emitir FACTURA_C (eso es solo para Monotributo EMISOR)
  */
 function determineInvoiceTypeFromCustomer(customerTaxStatus: string): InvoiceTypeUI {
   switch (customerTaxStatus) {
     case 'RESPONSABLE_INSCRIPTO':
-      return 'FACTURA_A';
+      return 'FACTURA_A'; // RI → RI = FACTURA_A
     case 'MONOTRIBUTO':
-      return 'FACTURA_B';
+      return 'FACTURA_B'; // RI → Monotributo = FACTURA_B
     case 'EXENTO':
-      return 'FACTURA_B';
+      return 'FACTURA_B'; // RI → Exento = FACTURA_B
     case 'CONSUMIDOR_FINAL':
-      return 'FACTURA_C';
+      return 'FACTURA_B'; // RI → Consumidor Final = FACTURA_B (CORREGIDO)
     default:
-      return 'FACTURA_C';
+      return 'FACTURA_B'; // RI → Otros = FACTURA_B (CORREGIDO)
   }
 }
 
