@@ -90,13 +90,28 @@ export class AfipService {
    */
   async getLastVoucher(tenantId: string, ptoVta: number, cbteTipo: number): Promise<number> {
     try {
+      console.log(`🔍 Consultando último comprobante: PtoVta=${ptoVta}, CbteTipo=${cbteTipo}`);
       const afip = await this.getAfipInstance(tenantId);
-      const lastVoucher = await afip.electronicBillingService.getLastVoucher(ptoVta, cbteTipo);
+      const lastVoucherResponse = await afip.electronicBillingService.getLastVoucher(ptoVta, cbteTipo);
       
-      // La librería devuelve el número directamente
-      return Number(lastVoucher) || 0;
+      console.log(`📋 Respuesta último comprobante AFIP:`, lastVoucherResponse);
+      
+      // La respuesta puede ser un número o un objeto con información del último comprobante
+      let lastNumber = 0;
+      if (typeof lastVoucherResponse === 'number') {
+        lastNumber = lastVoucherResponse;
+      } else if (lastVoucherResponse && typeof lastVoucherResponse === 'object') {
+        // Para el tipo IFECompUltimoAutorizadoResult, usar la propiedad CbteNro
+        lastNumber = (lastVoucherResponse as any).CbteNro || 0;
+      }
+      
+      console.log(`✅ Último número autorizado: ${lastNumber} para PtoVta=${ptoVta}, CbteTipo=${cbteTipo}`);
+      console.log(`📊 Próximo número a usar: ${lastNumber + 1}`);
+      
+      return Number(lastNumber) || 0;
     } catch (error) {
-      console.error("❌ Error obteniendo último comprobante:", error);
+      console.error(`❌ Error obteniendo último comprobante PtoVta=${ptoVta}, CbteTipo=${cbteTipo}:`, error);
+      console.error("📝 Retornando 0 como fallback - ATENCIÓN: Esto causará numeración desde 1");
       return 0;
     }
   }

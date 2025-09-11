@@ -5,11 +5,6 @@ import type {
   TaxStatus, 
   DocumentType, 
   AfipMode,
-  BillingInterval,
-  SubscriptionStatus,
-  InvoiceStatus,
-  PaymentStatus,
-  PaymentProcessor,
   MPPaymentMethod,
   MPPreferenceStatus,
   MPPaymentMode

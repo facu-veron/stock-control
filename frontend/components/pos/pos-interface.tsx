@@ -657,7 +657,7 @@ export default function PosInterface() {
                     </ToggleGroupItem>
                   </ToggleGroup>
 
-                  {documentType === "factura" && (
+                  {/* {documentType === "factura" && (
                     <div className="space-y-2">
                       <label className="text-sm font-medium text-muted-foreground">
                         Punto de Venta {salesPointsLoading && "(Cargando...)"}
@@ -736,7 +736,7 @@ export default function PosInterface() {
                         </div>
                       )}
                     </div>
-                  )}
+                  )} */}
 
                   {documentType === "factura" && (
                     <ClienteSelectorCompleto

@@ -70,9 +70,9 @@ export const INVOICE_TYPE_OPTIONS = Object.entries(INVOICE_TYPE_LABELS).map(
 // ✅ CONVERSIONES LEGACY (para compatibilidad con código existente)
 export function convertLegacyTaxStatus(legacyStatus: string): TaxConditionUI {
   const mapping: Record<string, TaxConditionUI> = {
-    'Responsable Inscripto': 'RESPONSABLE_INSCRIPTO',
-    'Monotributista': 'MONOTRIBUTO',
-    'Monotributo': 'MONOTRIBUTO',
+/*     'Responsable Inscripto': 'RESPONSABLE_INSCRIPTO',
+ */   /*  'Monotributista': 'MONOTRIBUTO',
+    'Monotributo': 'MONOTRIBUTO', */
     'MONOTRIBUTO': 'MONOTRIBUTO', // ✅ Agregar key exacta
     'RESPONSABLE_INSCRIPTO': 'RESPONSABLE_INSCRIPTO', // ✅ Agregar key exacta
     'EXENTO': 'EXENTO', // ✅ Agregar key exacta
@@ -115,14 +115,14 @@ export interface CompanyInfo {
 
 // ✅ CONFIGURACIÓN DEL EMISOR
 // En un sistema real, esto se obtendría de la configuración del tenant
-export function getCompanyTaxInfo(): CompanyInfo {
+/* export function getCompanyTaxInfo(): CompanyInfo {
   // Tu empresa es Responsable Inscripto (CUIT: 20-29907425-1)
   return {
     taxCondition: 'RESPONSABLE_INSCRIPTO',
     cuit: '20299074251',
     canIssue: ['FACTURA_A', 'FACTURA_B', 'TICKET'] // RI puede emitir A y B
   };
-}
+} */
 
 // ✅ VALIDACIONES DE COMPATIBILIDAD
 // IMPORTANTE: Validaciones para emisor RESPONSABLE INSCRIPTO
