@@ -1,0 +1,142 @@
+version: '3.8'
+
+services:
+  # Frontend (Next.js)
+  frontend:
+    build: 
+      context: ./frontend
+      dockerfile: Dockerfile.prod
+    container_name: stockcontrol_frontend_prod
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
+      - NEXT_PUBLIC_API_URL=https://stockcontrol.unlimitdevsoftware.com/api
+    depends_on:
+      - backend
+    networks:
+      - stockcontrol-network
+
+  # Backend (Express + TypeScript)
+  backend:
+    build: 
+      context: ./backend
+      dockerfile: Dockerfile.prod
+    container_name: stockcontrol_backend_prod
+    restart: unless-stopped
+    environment:
+      # Database (usando el nombre del servicio 'postgres')
+      - DATABASE_URL=postgresql://stockcontrol_user:${PROD_DB_PASSWORD}@postgres:5432/stockcontrol_prod_db
+      - SHADOW_DATABASE_URL=postgresql://stockcontrol_user:${PROD_DB_PASSWORD}@postgres:5432/stockcontrol_prod_shadow
+      
+      # JWT
+      - JWT_SECRET=${PROD_JWT_SECRET}
+      - JWT_EXPIRES_IN=7d
+      
+      # App
+      - PORT=3001
+      - NODE_ENV=production
+      - FRONTEND_URL=https://stockcontrol.unlimitdevsoftware.com
+      
+      # Redis (usando el nombre del servicio 'redis')
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - REDIS_PASSWORD=
+      - REDIS_DB=0
+      
+      
+      
+      # CORS
+      - ALLOWED_ORIGINS=https://stockcontrol.unlimitdevsoftware.com,https://unlimitdevsoftware.com
+      
+      # Rate Limiting
+      - RATE_LIMIT_WINDOW_MS=900000
+      - RATE_LIMIT_MAX_REQUESTS=100
+      - RATE_LIMIT_AUTH_MAX=5
+      
+    depends_on:
+      postgres:
+        condition: service_healthy
+    volumes:
+      - ./certs:/app/certs:ro
+      - backend_uploads:/app/uploads
+    networks:
+      - stockcontrol-network
+
+  # PostgreSQL (adaptado de tu configuración)
+  postgres:
+    image: postgres:16
+    container_name: stockcontrol_postgres_prod
+    restart: unless-stopped
+    environment:
+      - POSTGRES_USER=stockcontrol_user
+      - POSTGRES_PASSWORD=${PROD_DB_PASSWORD}
+      - POSTGRES_DB=stockcontrol_prod_db
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./postgres-init:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U stockcontrol_user -d stockcontrol_prod_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - stockcontrol-network
+
+  # Redis (igual que tu configuración)
+  redis:
+    image: redis:7
+    container_name: stockcontrol_redis_prod
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis_data:/data
+    networks:
+      - stockcontrol-network
+
+  # pgAdmin (opcional para producción)
+  pgadmin:
+    image: dpage/pgadmin4:latest
+    container_name: stockcontrol_pgadmin_prod
+    restart: unless-stopped
+    environment:
+      - PGADMIN_DEFAULT_EMAIL=admin@unlimitdevsoftware.com
+      - PGADMIN_DEFAULT_PASSWORD=${PROD_DB_PASSWORD}
+      - PGADMIN_CONFIG_CHECK_EMAIL_DELIVERABILITY=False
+    ports:
+      - "5050:80"
+    volumes:
+      - pgadmin_data:/var/lib/pgadmin
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - stockcontrol-network
+    profiles:
+      - admin  # Solo se levanta con: docker-compose --profile admin up
+
+  # Nginx para SSL y routing
+  nginx:
+    image: nginx:alpine
+    container_name: stockcontrol_nginx_prod
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - stockcontrol-network
+
+volumes:
+  postgres_data:
+  redis_data:
+  pgadmin_data:
+  backend_uploads:
+
+networks:
+  stockcontrol-network:
+    driver: bridge

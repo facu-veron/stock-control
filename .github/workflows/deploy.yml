@@ -1,0 +1,177 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+      
+    - name: Deploy to Production VPS
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.PROD_HOST }}
+        username: ${{ secrets.PROD_USERNAME }}
+        key: ${{ secrets.PROD_DEPLOY_SSH_KEY }}
+        script: |
+          echo "🚀 Iniciando deploy de Stock Control..."
+          
+          cd /home/deploy/stockcontrol
+          
+          # Clonar o actualizar repositorio
+          if [ ! -d "repo" ]; then
+            echo "📥 Clonando repositorio..."
+            git clone https://github.com/${{ github.repository }}.git repo
+          else
+            echo "🔄 Actualizando código..."
+            cd repo
+            git pull origin main
+            cd ..
+          fi
+          
+          # Copiar archivos del repositorio
+          echo "📁 Copiando archivos..."
+          cp -r repo/backend ./
+          cp -r repo/frontend ./
+          
+          # Crear postgres-init directory con script
+          mkdir -p postgres-init
+          cat > postgres-init/01-create-shadow-db.sql << 'SQL_EOF'
+          CREATE DATABASE stockcontrol_prod_shadow;
+          GRANT ALL PRIVILEGES ON DATABASE stockcontrol_prod_shadow TO stockcontrol_user;
+          \c stockcontrol_prod_shadow;
+          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+          CREATE EXTENSION IF NOT EXISTS "citext";
+          \c stockcontrol_prod_db;
+          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+          CREATE EXTENSION IF NOT EXISTS "citext";
+          SQL_EOF
+          
+          # Crear docker-compose.prod.yml
+          cat > docker-compose.prod.yml << 'COMPOSE_EOF'
+          version: '3.8'
+          
+          services:
+            frontend:
+              build: 
+                context: ./frontend
+                dockerfile: Dockerfile.prod
+              container_name: stockcontrol_frontend_prod
+              restart: unless-stopped
+              environment:
+                - NODE_ENV=production
+                - NEXT_PUBLIC_API_URL=https://stockcontrol.unlimitdevsoftware.com/api
+              depends_on:
+                - backend
+              networks:
+                - stockcontrol-network
+          
+            backend:
+              build: 
+                context: ./backend
+                dockerfile: Dockerfile.prod
+              container_name: stockcontrol_backend_prod
+              restart: unless-stopped
+              environment:
+                - DATABASE_URL=postgresql://stockcontrol_user:${{ secrets.PROD_DB_PASSWORD }}@postgres:5432/stockcontrol_prod_db
+                - SHADOW_DATABASE_URL=postgresql://stockcontrol_user:${{ secrets.PROD_DB_PASSWORD }}@postgres:5432/stockcontrol_prod_shadow
+                - JWT_SECRET=${{ secrets.PROD_JWT_SECRET }}
+                - JWT_EXPIRES_IN=7d
+                - PORT=3001
+                - NODE_ENV=production
+                - FRONTEND_URL=https://stockcontrol.unlimitdevsoftware.com
+                - REDIS_HOST=redis
+                - REDIS_PORT=6379
+                - REDIS_PASSWORD=
+                - REDIS_DB=0
+                - AFIP_ENV=homologacion
+                - AFIP_CUIT=23415422229
+                - AFIP_MODE=HOMOLOGACION
+                - AFIP_LOG_LEVEL=info
+                - ALLOWED_ORIGINS=https://stockcontrol.unlimitdevsoftware.com,https://unlimitdevsoftware.com
+                - RATE_LIMIT_WINDOW_MS=900000
+                - RATE_LIMIT_MAX_REQUESTS=100
+                - RATE_LIMIT_AUTH_MAX=5
+              depends_on:
+                postgres:
+                  condition: service_healthy
+              volumes:
+                - backend_uploads:/app/uploads
+              networks:
+                - stockcontrol-network
+          
+            postgres:
+              image: postgres:16
+              container_name: stockcontrol_postgres_prod
+              restart: unless-stopped
+              environment:
+                - POSTGRES_USER=stockcontrol_user
+                - POSTGRES_PASSWORD=${{ secrets.PROD_DB_PASSWORD }}
+                - POSTGRES_DB=stockcontrol_prod_db
+              volumes:
+                - postgres_data:/var/lib/postgresql/data
+                - ./postgres-init:/docker-entrypoint-initdb.d
+              healthcheck:
+                test: ["CMD-SHELL", "pg_isready -U stockcontrol_user -d stockcontrol_prod_db"]
+                interval: 10s
+                timeout: 5s
+                retries: 5
+              networks:
+                - stockcontrol-network
+          
+            redis:
+              image: redis:7
+              container_name: stockcontrol_redis_prod
+              restart: unless-stopped
+              command: ["redis-server", "--appendonly", "yes"]
+              volumes:
+                - redis_data:/data
+              networks:
+                - stockcontrol-network
+          
+          volumes:
+            postgres_data:
+            redis_data:
+            backend_uploads:
+          
+          networks:
+            stockcontrol-network:
+              driver: bridge
+          COMPOSE_EOF
+          
+          # Levantar servicios
+          echo "🐳 Levantando servicios..."
+          docker-compose -f docker-compose.prod.yml up -d --build
+          
+          # Esperar que la base de datos esté lista
+          echo "⏳ Esperando que la base de datos esté lista..."
+          sleep 30
+          
+          # Ejecutar migraciones de Prisma
+          echo "🗄️ Ejecutando migraciones..."
+          docker-compose -f docker-compose.prod.yml exec -T backend npx prisma migrate deploy || echo "Migraciones ya aplicadas"
+          
+          # Verificar servicios
+          echo "✅ Verificando servicios..."
+          docker-compose -f docker-compose.prod.yml ps
+          
+          # Limpiar
+          echo "🧹 Limpiando imágenes viejas..."
+          docker image prune -f
+          
+          echo "🎉 Deploy completado!"
+          echo "🌐 Aplicación disponible en: https://stockcontrol.unlimitdevsoftware.com"
+          
+    - name: Notify Success
+      if: success()
+      run: echo "✅ Deploy exitoso a producción"
+        
+    - name: Notify Failure
+      if: failure()
+      run: echo "❌ Deploy falló - revisar logs"
