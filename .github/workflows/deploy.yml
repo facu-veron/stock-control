@@ -22,152 +22,92 @@ jobs:
         script: |
           echo "🚀 Iniciando deploy de Stock Control..."
           
-          mkdir -p /home/deploy/stockcontrol
-          cd /home/deploy/stockcontrol
+          # Directorio de trabajo
+          DEPLOY_DIR="/home/deploy/stockcontrol"
+          mkdir -p $DEPLOY_DIR
+          cd $DEPLOY_DIR
           
           # Clonar o actualizar repositorio
-          if [ ! -d "repo" ]; then
+          if [ ! -d "stock-control" ]; then
             echo "📥 Clonando repositorio..."
-            git clone https://github.com/${{ github.repository }}.git repo
+            git clone https://github.com/${{ github.repository }}.git stock-control
           else
             echo "🔄 Actualizando código..."
-            cd repo
-            git pull origin main
+            cd stock-control
+            git fetch origin
+            git reset --hard origin/main
             cd ..
           fi
           
-          # Copiar archivos del repositorio
-          echo "📁 Copiando archivos..."
-          cp -r repo/backend ./
-          cp -r repo/frontend ./
+          # Copiar archivos necesarios desde el repo
+          echo "📁 Preparando archivos..."
+          cp -r stock-control/backend ./
+          cp -r stock-control/frontend ./
+          cp -r stock-control/nginx ./
+          cp -r stock-control/postgres-init ./
+          cp stock-control/docker-compose.prod.yml ./
+          cp stock-control/Makefile ./
           
-          # Crear postgres-init directory con script
-          mkdir -p postgres-init
-          cat > postgres-init/01-create-shadow-db.sql << 'SQL_EOF'
-          CREATE DATABASE stockcontrol_prod_shadow;
-          GRANT ALL PRIVILEGES ON DATABASE stockcontrol_prod_shadow TO stockcontrol_user;
-          \c stockcontrol_prod_shadow;
-          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-          CREATE EXTENSION IF NOT EXISTS "citext";
-          \c stockcontrol_prod_db;
-          CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
-          CREATE EXTENSION IF NOT EXISTS "citext";
-          SQL_EOF
+          # Crear archivo de variables de entorno para producción
+          cat > .env.prod << 'ENV_EOF'
+          PROD_DB_PASSWORD=${{ secrets.PROD_DB_PASSWORD }}
+          PROD_JWT_SECRET=${{ secrets.PROD_JWT_SECRET }}
+          ENV_EOF
           
-          # Crear docker-compose.prod.yml
-          cat > docker-compose.prod.yml << 'COMPOSE_EOF'
-          version: '3.8'
+          # Crear directorio SSL si no existe
+          mkdir -p ssl
           
-          services:
-            frontend:
-              build: 
-                context: ./frontend
-                dockerfile: Dockerfile.prod
-              container_name: stockcontrol_frontend_prod
-              restart: unless-stopped
-              environment:
-                - NODE_ENV=production
-                - NEXT_PUBLIC_API_URL=https://stockcontrol.unlimitdevsoftware.com/api
-              depends_on:
-                - backend
-              networks:
-                - stockcontrol-network
+          # Si no existen certificados SSL, generar certificados temporales
+          if [ ! -f "ssl/live/stockcontrol.unlimitdevsoftware.com/fullchain.pem" ]; then
+            echo "🔐 Generando certificados SSL temporales..."
+            mkdir -p ssl/live/stockcontrol.unlimitdevsoftware.com
+            
+            # Generar certificados auto-firmados temporales
+            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+              -keyout ssl/live/stockcontrol.unlimitdevsoftware.com/privkey.pem \
+              -out ssl/live/stockcontrol.unlimitdevsoftware.com/fullchain.pem \
+              -subj "/C=AR/ST=BuenosAires/L=BuenosAires/O=UnlimitDev/CN=stockcontrol.unlimitdevsoftware.com"
+            
+            echo "⚠️  Usando certificados temporales. Genera certificados Let's Encrypt después del deploy."
+          fi
           
-            backend:
-              build: 
-                context: ./backend
-                dockerfile: Dockerfile.prod
-              container_name: stockcontrol_backend_prod
-              restart: unless-stopped
-              environment:
-                - DATABASE_URL=postgresql://stockcontrol_user:${{ secrets.PROD_DB_PASSWORD }}@postgres:5432/stockcontrol_prod_db
-                - SHADOW_DATABASE_URL=postgresql://stockcontrol_user:${{ secrets.PROD_DB_PASSWORD }}@postgres:5432/stockcontrol_prod_shadow
-                - JWT_SECRET=${{ secrets.PROD_JWT_SECRET }}
-                - JWT_EXPIRES_IN=7d
-                - PORT=3001
-                - NODE_ENV=production
-                - FRONTEND_URL=https://stockcontrol.unlimitdevsoftware.com
-                - REDIS_HOST=redis
-                - REDIS_PORT=6379
-                - REDIS_PASSWORD=
-                - REDIS_DB=0
-                - AFIP_ENV=homologacion
-                - AFIP_CUIT=23415422229
-                - AFIP_MODE=HOMOLOGACION
-                - AFIP_LOG_LEVEL=info
-                - ALLOWED_ORIGINS=https://stockcontrol.unlimitdevsoftware.com,https://unlimitdevsoftware.com
-                - RATE_LIMIT_WINDOW_MS=900000
-                - RATE_LIMIT_MAX_REQUESTS=100
-                - RATE_LIMIT_AUTH_MAX=5
-              depends_on:
-                postgres:
-                  condition: service_healthy
-              volumes:
-                - backend_uploads:/app/uploads
-              networks:
-                - stockcontrol-network
+          # Detener servicios existentes
+          echo "🛑 Deteniendo servicios existentes..."
+          docker-compose -f docker-compose.prod.yml --env-file .env.prod down || true
           
-            postgres:
-              image: postgres:16
-              container_name: stockcontrol_postgres_prod
-              restart: unless-stopped
-              environment:
-                - POSTGRES_USER=stockcontrol_user
-                - POSTGRES_PASSWORD=${{ secrets.PROD_DB_PASSWORD }}
-                - POSTGRES_DB=stockcontrol_prod_db
-              volumes:
-                - postgres_data:/var/lib/postgresql/data
-                - ./postgres-init:/docker-entrypoint-initdb.d
-              healthcheck:
-                test: ["CMD-SHELL", "pg_isready -U stockcontrol_user -d stockcontrol_prod_db"]
-                interval: 10s
-                timeout: 5s
-                retries: 5
-              networks:
-                - stockcontrol-network
-          
-            redis:
-              image: redis:7
-              container_name: stockcontrol_redis_prod
-              restart: unless-stopped
-              command: ["redis-server", "--appendonly", "yes"]
-              volumes:
-                - redis_data:/data
-              networks:
-                - stockcontrol-network
-          
-          volumes:
-            postgres_data:
-            redis_data:
-            backend_uploads:
-          
-          networks:
-            stockcontrol-network:
-              driver: bridge
-          COMPOSE_EOF
+          # Limpiar imágenes antiguas
+          echo "🧹 Limpiando imágenes antiguas..."
+          docker image prune -f || true
           
           # Levantar servicios
           echo "🐳 Levantando servicios..."
-          docker-compose -f docker-compose.prod.yml up -d --build
+          docker-compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
           
-          # Esperar que la base de datos esté lista
-          echo "⏳ Esperando que la base de datos esté lista..."
-          sleep 30
+          # Esperar que los servicios estén listos
+          echo "⏳ Esperando que los servicios estén listos..."
+          sleep 60
           
           # Ejecutar migraciones de Prisma
           echo "🗄️ Ejecutando migraciones..."
-          docker-compose -f docker-compose.prod.yml exec -T backend npx prisma migrate deploy || echo "Migraciones ya aplicadas"
+          docker-compose -f docker-compose.prod.yml --env-file .env.prod exec -T backend npx prisma migrate deploy || echo "❌ Error en migraciones, continuando..."
           
-          # Verificar servicios
+          # Verificar estado de servicios
           echo "✅ Verificando servicios..."
-          docker-compose -f docker-compose.prod.yml ps
+          docker-compose -f docker-compose.prod.yml --env-file .env.prod ps
           
-          # Limpiar
-          echo "🧹 Limpiando imágenes viejas..."
-          docker image prune -f
+          # Verificar conectividad
+          echo "🌐 Verificando conectividad..."
+          sleep 10
+          curl -I http://localhost:80 || echo "❌ HTTP no responde"
           
           echo "🎉 Deploy completado!"
-          echo "🌐 Aplicación disponible en: https://stockcontrol.unlimitdevsoftware.com"
+          echo ""
+          echo "📋 Para obtener certificados SSL reales, ejecuta:"
+          echo "   make ssl-generate"
+          echo ""
+          echo "🌐 URLs disponibles:"
+          echo "   HTTP:  http://stockcontrol.unlimitdevsoftware.com"
+          echo "   HTTPS: https://stockcontrol.unlimitdevsoftware.com (certificado temporal)"
           
     - name: Notify Success
       if: success()
