@@ -84,7 +84,7 @@ export const authenticateToken = async (
       })
     }
 
-    // Agregar tanto user como tenant a la request
+    // Agregar tanto user como tenant a la request.
     req.user = {
       id: user.id,
       email: user.email,
