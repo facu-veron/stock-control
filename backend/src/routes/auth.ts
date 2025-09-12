@@ -9,6 +9,8 @@ import { authenticateToken, requireRole } from "../middleware/auth";
 const prisma = new PrismaClient();
 const router = Router();
 
+const secret = process.env.JWT_SECRET || "your-fallback-secret-key";
+
 /* =========================
  * Helpers
  * =======================*/
@@ -20,9 +22,7 @@ const fail = (res: Response, code: number, error: string, details?: unknown) =>
   res.status(code).json({ success: false, error, details } as ApiResponse);
 
 const signToken = (payload: object) =>
-  jwt.sign(payload, process.env.JWT_SECRET!, {
-    expiresIn: process.env.JWT_EXPIRES_IN ?? "7d",
-  });
+  jwt.sign(payload, secret, { expiresIn: "7d" });
 
 /* =========================
  * Validations
