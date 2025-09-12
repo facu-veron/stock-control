@@ -22,6 +22,7 @@ jobs:
         script: |
           echo "🚀 Iniciando deploy de Stock Control..."
           
+          mkdir -p /home/deploy/stockcontrol
           cd /home/deploy/stockcontrol
           
           # Clonar o actualizar repositorio
