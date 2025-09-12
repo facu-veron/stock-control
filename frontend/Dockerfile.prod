@@ -1,8 +1,67 @@
-FROM node:24-alpine
+FROM node:24-alpine AS base
+
+# Instalar dependencias del sistema
+RUN apk add --no-cache libc6-compat curl
+
 WORKDIR /app
+
+# ==========================================
+# STAGE 1: Instalar dependencias
+# ==========================================
+FROM base AS deps
+
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci
+
+# ==========================================
+# STAGE 2: Build de Next.js
+# ==========================================
+FROM base AS builder
+WORKDIR /app
+
+COPY --from=deps /app/node_modules ./node_modules
 COPY . .
+
+# Variables de entorno para build
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Build de Next.js
 RUN npm run build
+
+# ==========================================
+# STAGE 3: Imagen de producción
+# ==========================================
+FROM base AS runner
+WORKDIR /app
+
+ENV NODE_ENV=production
+ENV NEXT_TELEMETRY_DISABLED=1
+
+# Crear usuario no-root
+RUN addgroup --system --gid 1001 nodejs
+RUN adduser --system --uid 1001 nextjs
+
+# Copiar archivos necesarios
+COPY package*.json ./
+
+# Instalar solo dependencias de producción
+RUN npm ci --omit=dev && npm cache clean --force
+
+# Copiar archivos de build
+COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
+COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
+COPY --from=builder --chown=nextjs:nodejs /app/public ./public
+
+USER nextjs
+
 EXPOSE 3000
-CMD ["npm", "start"]
+
+ENV PORT=3000
+ENV HOSTNAME="0.0.0.0"
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD curl -f http://localhost:3000/api/health || exit 1
+
+CMD ["node", "server.js"]

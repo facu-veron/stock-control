@@ -99,17 +99,15 @@ class Server {
     // CORS configurado para multitenant
     this.app.use(
       cors({
-        origin: (origin, callback) => {
-          // En producción, validar contra lista de dominios permitidos
+        origin: (origin: string | undefined, callback: (err: Error | null, allow?: boolean) => void) => {
           if (this.isProduction) {
             const allowedOrigins = (process.env.ALLOWED_ORIGINS || "").split(",");
             if (!origin || allowedOrigins.includes(origin)) {
               callback(null, true);
             } else {
-              callback(new Error("No permitido por CORS"));
+              callback(new Error("No permitido por CORS"), false);
             }
           } else {
-            // En desarrollo, permitir cualquier origen
             callback(null, true);
           }
         },
@@ -118,7 +116,6 @@ class Server {
         allowedHeaders: ["Content-Type", "Authorization", "X-Tenant-Id"],
       })
     );
-
     // Body parsing
     this.app.use(express.json({ limit: "10mb" }));
     this.app.use(express.urlencoded({ extended: true, limit: "10mb" }));

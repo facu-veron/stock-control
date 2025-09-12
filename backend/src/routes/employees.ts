@@ -42,10 +42,10 @@ router.get("/:id", authenticateToken, requireRole(["ADMIN"]), async (req: Authen
     
     // No podemos devolver el pin original, solo null
     const employeeWithPin = { ...employee, pin: null };
-    res.json({ success: true, data: employeeWithPin });
+    return res.json({ success: true, data: employeeWithPin });
   } catch (error) {
     console.error("Error al obtener empleado:", error);
-    res.status(500).json({ success: false, error: "Error interno al obtener empleado" });
+    return res.status(500).json({ success: false, error: "Error interno al obtener empleado" });
   }
 });
 
