@@ -50,35 +50,18 @@ docker run --rm -v "./ssl:/etc/letsencrypt" -v "./ssl/webroot:/var/www/certbot" 
 if [ -f "ssl/live/stockcontrol.unlimitdevsoftware.com/fullchain.pem" ]; then
     echo "✅ Certificados SSL generados exitosamente"
     
-    # Cambiar a configuración HTTPS
-    echo "🔄 Cambiando a configuración HTTPS..."
-    docker-compose -f docker-compose.prod.yml --env-file .env.prod exec nginx \
-        cp /etc/nginx/ssl/nginx.conf /etc/nginx/nginx.conf || true
-    
-    # Actualizar el volume mount para usar la configuración HTTPS
-    echo "📝 Actualizando docker-compose para usar HTTPS..."
-    sed -i 's|nginx-http-only.conf|nginx.conf|g' docker-compose.prod.yml
-    
-    # Reiniciar todo el stack
-    echo "🔄 Reiniciando servicios con HTTPS..."
-    docker-compose -f docker-compose.prod.yml --env-file .env.prod up -d nginx
+    # Reiniciar nginx (la configuración unificada detectará automáticamente SSL)
+    echo "🔄 Reiniciando servicios con SSL automático..."
+    docker-compose -f docker-compose.prod.yml --env-file .env.prod start nginx
     
     # Verificar estado
     sleep 10
     docker-compose -f docker-compose.prod.yml --env-file .env.prod ps
     
-    # Probar HTTPS
-    echo "🧪 Probando HTTPS..."
-    if curl -k -I https://localhost > /dev/null 2>&1; then
-        echo "✅ HTTPS funciona localmente"
-    else
-        echo "⚠️  HTTPS no responde localmente, pero debería funcionar desde afuera"
-    fi
-    
     echo "🎉 SSL configurado exitosamente!"
     echo ""
     echo "🌐 URLs disponibles:"
-    echo "   HTTP:  http://stockcontrol.unlimitdevsoftware.com (redirige a HTTPS)"
+    echo "   HTTP:  http://stockcontrol.unlimitdevsoftware.com (redirige automáticamente a HTTPS)"
     echo "   HTTPS: https://stockcontrol.unlimitdevsoftware.com"
     
 else

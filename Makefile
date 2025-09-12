@@ -207,7 +207,7 @@ ssl-renew:
 health:
 	@echo "🏥 Verificando salud de servicios..."
 	@echo "🔍 Nginx:"
-	@curl -s -I http://localhost:80 | head -1 || echo "❌ Nginx no responde"
+	@curl -s -I http://localhost:80/nginx-health | head -1 || echo "❌ Nginx no responde"
 	@echo "🔍 Frontend (interno):"
 	@docker-compose -f $(COMPOSE_FILE) exec frontend wget -qO- http://localhost:3000 > /dev/null && echo "✅ Frontend OK" || echo "❌ Frontend no responde"
 	@echo "🔍 Backend (interno):"
@@ -216,6 +216,13 @@ health:
 	@docker-compose -f $(COMPOSE_FILE) exec postgres pg_isready -U stockcontrol_user && echo "✅ PostgreSQL OK" || echo "❌ PostgreSQL no responde"
 	@echo "🔍 Redis:"
 	@docker-compose -f $(COMPOSE_FILE) exec redis redis-cli ping | grep PONG > /dev/null && echo "✅ Redis OK" || echo "❌ Redis no responde"
+	@echo "🔐 SSL Status:"
+	@if [ -f "./ssl/live/$(DOMAIN)/fullchain.pem" ]; then \
+		echo "✅ SSL Certificados encontrados"; \
+		openssl x509 -in ./ssl/live/$(DOMAIN)/fullchain.pem -enddate -noout 2>/dev/null || echo "⚠️ Error leyendo certificado"; \
+	else \
+		echo "ℹ️ SSL no configurado (usando HTTP)"; \
+	fi
 
 # Deploy rápido desde local (para testing)
 deploy-local:

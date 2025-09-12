@@ -93,7 +93,7 @@ services:
       timeout: 10s
       retries: 3
 
-  # Nginx para routing (HTTP inicialmente, HTTPS después)
+  # Nginx - Configuración unificada con SSL automático
   nginx:
     image: nginx:alpine
     container_name: stockcontrol_nginx_prod
@@ -102,8 +102,9 @@ services:
       - "80:80"
       - "443:443"
     volumes:
-      # Usar configuración HTTP-only por defecto
-      - ./nginx/nginx-http-only.conf:/etc/nginx/nginx.conf:ro
+      # Configuración unificada que maneja HTTP y HTTPS automáticamente
+      - ./nginx/nginx-unified.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/proxy_headers.conf:/etc/nginx/proxy_headers.conf:ro
       - ./ssl:/etc/nginx/ssl:ro
       - certbot_webroot:/var/www/certbot:ro
     depends_on:
