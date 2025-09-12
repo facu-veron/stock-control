@@ -111,15 +111,40 @@ make deploy-local     # Deploy rápido desde local
 
 ## 🔧 Próximos Pasos
 
-1. **Hacer push** de estos cambios
-2. **Verificar deploy** automático
-3. **Generar certificados** SSL reales con `make ssl-generate`
-4. **Configurar cron job** para renovación automática de SSL
+1. **Hacer push** de estos cambios ✅
+2. **Verificar deploy** automático ✅ 
+3. **Generar certificados** SSL reales ejecutando en tu VPS:
+   ```bash
+   chmod +x setup-ssl.sh
+   ./setup-ssl.sh
+   ```
+4. **Verificar que todo funciona** visitando las URLs
 
-### Cron job sugerido (en el VPS):
+### Problemas Comunes y Soluciones:
+
+#### 🛠️ **Si Nginx está "Restarting":**
+```bash
+# En tu VPS
+cd /home/deploy/stockcontrol
+docker-compose -f docker-compose.prod.yml --env-file .env.prod logs nginx
+make test-nginx  # Probar configuración
+```
+
+#### 🔐 **Si necesitas regenerar certificados SSL:**
+```bash
+sudo rm -rf ssl/live/stockcontrol.unlimitdevsoftware.com
+./setup-ssl.sh
+```
+
+#### 📁 **Si hay problemas de permisos:**
+```bash
+sudo chown -R deploy:deploy /home/deploy/stockcontrol
+```
+
+### Cron job sugerido (configurado automáticamente por setup-ssl.sh):
 ```bash
 # Renovar certificados SSL cada 2 meses
-0 0 1 */2 * cd /home/deploy/stockcontrol && make ssl-renew
+0 0 1 */2 * cd /home/deploy/stockcontrol && docker-compose -f docker-compose.prod.yml --env-file .env.prod run --rm certbot renew && docker-compose -f docker-compose.prod.yml --env-file .env.prod restart nginx
 ```
 
 ---

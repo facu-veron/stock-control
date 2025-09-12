@@ -106,15 +106,21 @@ services:
       - ./ssl:/etc/nginx/ssl:ro
       - certbot_webroot:/var/www/certbot:ro
     depends_on:
-      - frontend
-      - backend
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_healthy
     networks:
       - stockcontrol-network
+    # Comando para validar la configuración antes de iniciar
+    command: >
+      sh -c "nginx -t && exec nginx -g 'daemon off;'"
     healthcheck:
-      test: ["CMD", "nginx", "-t"]
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:80"]
       interval: 30s
       timeout: 10s
       retries: 3
+      start_period: 30s
 
   # Certbot para SSL automático
   certbot:

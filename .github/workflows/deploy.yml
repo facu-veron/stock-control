@@ -24,8 +24,15 @@ jobs:
           
           # Directorio de trabajo
           DEPLOY_DIR="/home/deploy/stockcontrol"
-          mkdir -p $DEPLOY_DIR
+          sudo mkdir -p $DEPLOY_DIR
+          sudo chown -R deploy:deploy $DEPLOY_DIR
           cd $DEPLOY_DIR
+          
+          # Limpiar directorio anterior si existe
+          if [ -d "backend" ]; then
+            echo "🧹 Limpiando archivos anteriores..."
+            sudo rm -rf backend frontend nginx postgres-init docker-compose.prod.yml Makefile || true
+          fi
           
           # Clonar o actualizar repositorio
           if [ ! -d "stock-control" ]; then
@@ -47,6 +54,9 @@ jobs:
           cp -r stock-control/postgres-init ./
           cp stock-control/docker-compose.prod.yml ./
           cp stock-control/Makefile ./
+          
+          # Asegurar permisos correctos
+          sudo chown -R deploy:deploy backend frontend nginx postgres-init
           
           # Crear archivo de variables de entorno para producción
           cat > .env.prod << 'ENV_EOF'
@@ -97,8 +107,27 @@ jobs:
           
           # Verificar conectividad
           echo "🌐 Verificando conectividad..."
-          sleep 10
-          curl -I http://localhost:80 || echo "❌ HTTP no responde"
+          sleep 15
+          
+          # Verificar que Nginx esté funcionando
+          NGINX_STATUS=$(docker-compose -f docker-compose.prod.yml --env-file .env.prod ps nginx | grep -o "Up\|Restarting\|Exited" || echo "Unknown")
+          echo "📊 Estado de Nginx: $NGINX_STATUS"
+          
+          if [ "$NGINX_STATUS" = "Restarting" ]; then
+            echo "⚠️  Nginx está reiniciando, verificando logs..."
+            docker-compose -f docker-compose.prod.yml --env-file .env.prod logs nginx | tail -20
+            echo "🔄 Intentando reiniciar Nginx..."
+            docker-compose -f docker-compose.prod.yml --env-file .env.prod restart nginx
+            sleep 10
+          fi
+          
+          # Probar conectividad HTTP
+          curl -I http://localhost:80 || echo "❌ HTTP no responde (normal si SSL está funcionando)"
+          
+          # Verificar si los servicios están respondiendo internamente
+          echo "🔍 Verificando servicios internos..."
+          docker-compose -f docker-compose.prod.yml --env-file .env.prod exec -T frontend wget -qO- http://localhost:3000 > /dev/null && echo "✅ Frontend OK" || echo "❌ Frontend no responde"
+          docker-compose -f docker-compose.prod.yml --env-file .env.prod exec -T backend wget -qO- http://localhost:3001 > /dev/null && echo "✅ Backend OK" || echo "❌ Backend no responde"
           
           echo "🎉 Deploy completado!"
           echo ""
