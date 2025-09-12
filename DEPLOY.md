@@ -94,6 +94,54 @@ make deploy-local     # Deploy rápido desde local
 
 ---
 
+## 🚨 Configuración SSH en Hostinger VPS
+
+### ⚠️ **Problema Común: Puerto SSH Bloqueado**
+
+Si obtienes errores `dial tcp ***:22: i/o timeout`, es porque **Hostinger bloquea SSH por defecto**:
+
+### ✅ **Solución - Habilitar SSH:**
+
+1. **Ve al hPanel de Hostinger:**
+   - Entra a tu cuenta de Hostinger
+   - Ve a **VPS** → Tu VPS → **Manage**
+
+2. **Abrir Puerto SSH:**
+   - Busca **Security** o **Firewall**
+   - Habilita el puerto **22 (SSH)**
+   - Permite acceso desde **"All IPs"** o específicamente desde GitHub Actions IPs:
+     - `140.82.112.0/20`
+     - `143.55.64.0/20`
+     - `185.199.108.0/22`
+     - `192.30.252.0/22`
+
+3. **Verificar Usuario SSH:**
+   - Ve a **SSH Access** en el panel
+   - Confirma que el usuario `deploy` existe
+   - Si no existe, créalo con permisos sudo
+
+4. **Configurar Clave SSH:**
+   - En **SSH Access** → **Manage SSH Keys**
+   - Agrega tu clave pública: `ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAII65upmfaidvci2O496JOfzA9Y4WrfZ8yZKLGoNmv8uL deploy@stockcontrol`
+
+### 🔧 **Alternativa - SSH por Terminal de hPanel:**
+
+Si no puedes abrir el puerto SSH:
+
+1. Usa el **Terminal integrado** de Hostinger hPanel
+2. Sigue los pasos del deploy manualmente:
+
+```bash
+# En el terminal de hPanel
+cd /home/tu_usuario
+git clone https://github.com/facu-veron/stock-control.git
+cd stock-control
+chmod +x setup-ssl.sh
+# ... resto de comandos del deploy
+```
+
+---
+
 ## 🌐 URLs Después del Deploy
 
 ### HTTP (siempre disponible):
