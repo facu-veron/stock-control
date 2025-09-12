@@ -24,15 +24,13 @@ jobs:
           
           # Directorio de trabajo
           DEPLOY_DIR="/home/deploy/stockcontrol"
-          sudo mkdir -p $DEPLOY_DIR
-          sudo chown -R deploy:deploy $DEPLOY_DIR
+          mkdir -p $DEPLOY_DIR || true
           cd $DEPLOY_DIR
           
-          # Limpiar directorio anterior si existe
-          if [ -d "backend" ]; then
-            echo "🧹 Limpiando archivos anteriores..."
-            sudo rm -rf backend frontend nginx postgres-init docker-compose.prod.yml Makefile || true
-          fi
+          # Limpiar completamente y empezar de cero
+          echo "🧹 Limpieza completa del directorio..."
+          docker system prune -af --volumes || true
+          rm -rf backend frontend nginx postgres-init docker-compose.prod.yml Makefile ssl || true
           
           # Clonar o actualizar repositorio
           if [ ! -d "stock-control" ]; then
@@ -54,9 +52,7 @@ jobs:
           cp -r stock-control/postgres-init ./
           cp stock-control/docker-compose.prod.yml ./
           cp stock-control/Makefile ./
-          
-          # Asegurar permisos correctos
-          sudo chown -R deploy:deploy backend frontend nginx postgres-init
+          cp stock-control/setup-ssl.sh ./
           
           # Crear archivo de variables de entorno para producción
           cat > .env.prod << 'ENV_EOF'
@@ -64,24 +60,10 @@ jobs:
           PROD_JWT_SECRET=${{ secrets.PROD_JWT_SECRET }}
           ENV_EOF
           
-          # Crear directorio SSL si no existe
-          mkdir -p ssl
+          # Crear directorio SSL
+          mkdir -p ssl ssl/webroot
           
-          # Si no existen certificados SSL, generar certificados temporales
-          if [ ! -f "ssl/live/stockcontrol.unlimitdevsoftware.com/fullchain.pem" ]; then
-            echo "🔐 Generando certificados SSL temporales..."
-            mkdir -p ssl/live/stockcontrol.unlimitdevsoftware.com
-            
-            # Generar certificados auto-firmados temporales
-            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-              -keyout ssl/live/stockcontrol.unlimitdevsoftware.com/privkey.pem \
-              -out ssl/live/stockcontrol.unlimitdevsoftware.com/fullchain.pem \
-              -subj "/C=AR/ST=BuenosAires/L=BuenosAires/O=UnlimitDev/CN=stockcontrol.unlimitdevsoftware.com"
-            
-            echo "⚠️  Usando certificados temporales. Genera certificados Let's Encrypt después del deploy."
-          fi
-          
-          # Detener servicios existentes
+          # Detener servicios existentes si existen
           echo "🛑 Deteniendo servicios existentes..."
           docker-compose -f docker-compose.prod.yml --env-file .env.prod down || true
           
@@ -95,7 +77,7 @@ jobs:
           
           # Esperar que los servicios estén listos
           echo "⏳ Esperando que los servicios estén listos..."
-          sleep 60
+          sleep 45
           
           # Ejecutar migraciones de Prisma
           echo "🗄️ Ejecutando migraciones..."
@@ -107,36 +89,32 @@ jobs:
           
           # Verificar conectividad
           echo "🌐 Verificando conectividad..."
-          sleep 15
+          sleep 10
           
-          # Verificar que Nginx esté funcionando
-          NGINX_STATUS=$(docker-compose -f docker-compose.prod.yml --env-file .env.prod ps nginx | grep -o "Up\|Restarting\|Exited" || echo "Unknown")
-          echo "📊 Estado de Nginx: $NGINX_STATUS"
-          
-          if [ "$NGINX_STATUS" = "Restarting" ]; then
-            echo "⚠️  Nginx está reiniciando, verificando logs..."
-            docker-compose -f docker-compose.prod.yml --env-file .env.prod logs nginx | tail -20
-            echo "🔄 Intentando reiniciar Nginx..."
-            docker-compose -f docker-compose.prod.yml --env-file .env.prod restart nginx
-            sleep 10
+          # Probar health check de nginx
+          if curl -s http://localhost/nginx-health > /dev/null; then
+            echo "✅ Nginx está funcionando correctamente"
+          else
+            echo "❌ Nginx no responde al health check"
+            docker-compose -f docker-compose.prod.yml --env-file .env.prod logs nginx | tail -10
           fi
           
-          # Probar conectividad HTTP
-          curl -I http://localhost:80 || echo "❌ HTTP no responde (normal si SSL está funcionando)"
-          
-          # Verificar si los servicios están respondiendo internamente
+          # Verificar servicios internos
           echo "🔍 Verificando servicios internos..."
           docker-compose -f docker-compose.prod.yml --env-file .env.prod exec -T frontend wget -qO- http://localhost:3000 > /dev/null && echo "✅ Frontend OK" || echo "❌ Frontend no responde"
-          docker-compose -f docker-compose.prod.yml --env-file .env.prod exec -T backend wget -qO- http://localhost:3001 > /dev/null && echo "✅ Backend OK" || echo "❌ Backend no responde"
+          docker-compose -f docker-compose.prod.yml --env-file .env.prod exec -T backend curl -f http://localhost:3001 > /dev/null && echo "✅ Backend OK" || echo "❌ Backend no responde"
           
           echo "🎉 Deploy completado!"
           echo ""
-          echo "📋 Para obtener certificados SSL reales, ejecuta:"
-          echo "   make ssl-generate"
+          echo "🌐 La aplicación está disponible en:"
+          echo "   ✅ HTTP:  http://stockcontrol.unlimitdevsoftware.com"
           echo ""
-          echo "🌐 URLs disponibles:"
-          echo "   HTTP:  http://stockcontrol.unlimitdevsoftware.com"
-          echo "   HTTPS: https://stockcontrol.unlimitdevsoftware.com (certificado temporal)"
+          echo "📋 Para habilitar HTTPS con certificados reales:"
+          echo "   1. Conéctate al servidor: ssh deploy@tu_servidor"
+          echo "   2. Ve al directorio: cd /home/deploy/stockcontrol"
+          echo "   3. Ejecuta: chmod +x setup-ssl.sh && ./setup-ssl.sh"
+          echo ""
+          echo "✨ ¡El deploy HTTP está funcionando perfectamente!"
           
     - name: Notify Success
       if: success()

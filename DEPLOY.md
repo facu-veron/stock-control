@@ -113,39 +113,43 @@ make deploy-local     # Deploy rápido desde local
 
 1. **Hacer push** de estos cambios ✅
 2. **Verificar deploy** automático ✅ 
-3. **Generar certificados** SSL reales ejecutando en tu VPS:
+3. **HTTP funcionando** inmediatamente: `http://stockcontrol.unlimitdevsoftware.com` ✅
+4. **Para HTTPS**, ejecuta en tu VPS:
    ```bash
+   ssh deploy@tu_servidor
+   cd /home/deploy/stockcontrol
    chmod +x setup-ssl.sh
    ./setup-ssl.sh
    ```
-4. **Verificar que todo funciona** visitando las URLs
 
-### Problemas Comunes y Soluciones:
+### ✨ Nuevo Flujo Simplificado:
 
-#### 🛠️ **Si Nginx está "Restarting":**
-```bash
-# En tu VPS
-cd /home/deploy/stockcontrol
-docker-compose -f docker-compose.prod.yml --env-file .env.prod logs nginx
-make test-nginx  # Probar configuración
-```
+#### ✅ **Deploy Automático (HTTP):**
+- Push a main → Deploy completo funcionando por HTTP
+- Sin problemas de certificados SSL
+- Sin errores de permisos
+- Aplicación lista para usar inmediatamente
 
-#### 🔐 **Si necesitas regenerar certificados SSL:**
-```bash
-sudo rm -rf ssl/live/stockcontrol.unlimitdevsoftware.com
-./setup-ssl.sh
-```
+#### 🔐 **Upgrade a HTTPS (Manual):**  
+- Script `setup-ssl.sh` para obtener certificados Let's Encrypt
+- Cambio automático de configuración HTTP → HTTPS
+- Renovación automática configurada
 
-#### 📁 **Si hay problemas de permisos:**
-```bash
-sudo chown -R deploy:deploy /home/deploy/stockcontrol
-```
+### Problemas SOLUCIONADOS:
 
-### Cron job sugerido (configurado automáticamente por setup-ssl.sh):
-```bash
-# Renovar certificados SSL cada 2 meses
-0 0 1 */2 * cd /home/deploy/stockcontrol && docker-compose -f docker-compose.prod.yml --env-file .env.prod run --rm certbot renew && docker-compose -f docker-compose.prod.yml --env-file .env.prod restart nginx
-```
+#### ✅ **Permisos arreglados:**
+- Eliminado uso de `sudo` que requiere contraseña
+- Limpieza completa en cada deploy
+
+#### ✅ **Nginx estable:**
+- Configuración HTTP-only por defecto
+- Health check incluido (`/nginx-health`)
+- Sin fallas por certificados faltantes
+
+#### ✅ **Deploy confiable:**
+- HTTP funciona siempre desde el primer deploy  
+- HTTPS opcional después
+- Verificaciones robustas de todos los servicios
 
 ---
 

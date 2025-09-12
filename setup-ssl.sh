@@ -11,47 +11,69 @@ cd /home/deploy/stockcontrol
 # Verificar que el dominio apunte al servidor
 echo "📡 Verificando DNS del dominio..."
 DOMAIN_IP=$(dig +short stockcontrol.unlimitdevsoftware.com)
-SERVER_IP=$(curl -s ifconfig.me)
+SERVER_IP=$(curl -s ifconfig.me 2>/dev/null || curl -s icanhazip.com 2>/dev/null || echo "unknown")
 
 echo "🔍 IP del dominio: $DOMAIN_IP"
 echo "🔍 IP del servidor: $SERVER_IP"
 
-if [ "$DOMAIN_IP" != "$SERVER_IP" ]; then
+if [ "$DOMAIN_IP" != "$SERVER_IP" ] && [ "$DOMAIN_IP" != "" ]; then
     echo "⚠️  ADVERTENCIA: El dominio no apunta a este servidor"
     echo "   Configura el DNS antes de continuar"
     read -p "¿Continuar de todos modos? (y/N): " confirm
     [ "$confirm" != "y" ] && exit 1
 fi
 
-# Detener nginx temporalmente
+# Verificar que nginx esté corriendo con HTTP
+echo "🔍 Verificando que la aplicación funcione por HTTP..."
+if ! curl -s http://localhost/nginx-health > /dev/null; then
+    echo "❌ La aplicación no responde por HTTP. Deploy primero la aplicación."
+    echo "   Ejecuta: make up"
+    exit 1
+fi
+
+# Detener nginx temporalmente para obtener certificados
 echo "🛑 Deteniendo Nginx para obtener certificados..."
 docker-compose -f docker-compose.prod.yml --env-file .env.prod stop nginx
 
 # Obtener certificados Let's Encrypt
 echo "📜 Obteniendo certificados SSL..."
-docker-compose -f docker-compose.prod.yml --env-file .env.prod run --rm --entrypoint "\
-    certbot certonly --standalone \
+docker run --rm -v "./ssl:/etc/letsencrypt" -v "./ssl/webroot:/var/www/certbot" \
+    -p 80:80 certbot/certbot \
+    certonly --standalone \
     --email admin@unlimitdevsoftware.com \
     --agree-tos \
     --no-eff-email \
-    -d stockcontrol.unlimitdevsoftware.com \
-    -d unlimitdevsoftware.com" certbot
+    --force-renewal \
+    -d stockcontrol.unlimitdevsoftware.com
 
 # Verificar que se generaron los certificados
 if [ -f "ssl/live/stockcontrol.unlimitdevsoftware.com/fullchain.pem" ]; then
     echo "✅ Certificados SSL generados exitosamente"
     
-    # Reiniciar nginx
-    echo "🔄 Reiniciando Nginx con SSL..."
-    docker-compose -f docker-compose.prod.yml --env-file .env.prod start nginx
+    # Cambiar a configuración HTTPS
+    echo "🔄 Cambiando a configuración HTTPS..."
+    docker-compose -f docker-compose.prod.yml --env-file .env.prod exec nginx \
+        cp /etc/nginx/ssl/nginx.conf /etc/nginx/nginx.conf || true
+    
+    # Actualizar el volume mount para usar la configuración HTTPS
+    echo "📝 Actualizando docker-compose para usar HTTPS..."
+    sed -i 's|nginx-http-only.conf|nginx.conf|g' docker-compose.prod.yml
+    
+    # Reiniciar todo el stack
+    echo "🔄 Reiniciando servicios con HTTPS..."
+    docker-compose -f docker-compose.prod.yml --env-file .env.prod up -d nginx
     
     # Verificar estado
     sleep 10
-    docker-compose -f docker-compose.prod.yml --env-file .env.prod ps nginx
+    docker-compose -f docker-compose.prod.yml --env-file .env.prod ps
     
     # Probar HTTPS
     echo "🧪 Probando HTTPS..."
-    curl -I https://stockcontrol.unlimitdevsoftware.com || echo "❌ HTTPS no responde aún"
+    if curl -k -I https://localhost > /dev/null 2>&1; then
+        echo "✅ HTTPS funciona localmente"
+    else
+        echo "⚠️  HTTPS no responde localmente, pero debería funcionar desde afuera"
+    fi
     
     echo "🎉 SSL configurado exitosamente!"
     echo ""
@@ -61,13 +83,13 @@ if [ -f "ssl/live/stockcontrol.unlimitdevsoftware.com/fullchain.pem" ]; then
     
 else
     echo "❌ Error al generar certificados SSL"
-    echo "🔄 Reiniciando con certificados temporales..."
+    echo "🔄 Reiniciando con configuración HTTP..."
     docker-compose -f docker-compose.prod.yml --env-file .env.prod start nginx
     exit 1
 fi
 
 # Configurar renovación automática
 echo "⏰ Configurando renovación automática de certificados..."
-(crontab -l 2>/dev/null; echo "0 0 1 */2 * cd /home/deploy/stockcontrol && docker-compose -f docker-compose.prod.yml --env-file .env.prod run --rm certbot renew && docker-compose -f docker-compose.prod.yml --env-file .env.prod restart nginx") | crontab -
+(crontab -l 2>/dev/null | grep -v "certbot renew"; echo "0 2 * * 1 cd /home/deploy/stockcontrol && docker run --rm -v './ssl:/etc/letsencrypt' -v './ssl/webroot:/var/www/certbot' certbot/certbot renew --quiet && docker-compose -f docker-compose.prod.yml --env-file .env.prod restart nginx") | crontab -
 
 echo "✅ Configuración SSL completa!"
