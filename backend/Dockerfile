@@ -1,7 +1,7 @@
 FROM node:24-alpine AS deps
 WORKDIR /app
 COPY package*.json ./
-RUN npm ci --only=production
+RUN npm ci --frozen-lockfile
 
 FROM node:24-alpine AS builder
 WORKDIR /app
