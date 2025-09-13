@@ -1,59 +1,98 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
 env:
-  IMAGE_TAG: ${{ github.sha }}   # usaremos el SHA como tag “inmutable”
+  REGISTRY: ghcr.io
+  IMAGE_TAG: ${{ github.sha }}
 
 jobs:
-  build-push:
+  build-and-push:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
     steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-qemu-action@v3
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Container Registry
+        uses: docker/login-action@v3
         with:
-          registry: ghcr.io
+          registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # APP
-      - name: Build & push app
-        uses: docker/build-push-action@v6
-        with:
-          context: ./stockcontrol-frontend
-          push: true
-          platforms: linux/amd64
-          tags: |
-            ghcr.io/${{ github.repository_owner }}/stockcontrol-app:${{ env.IMAGE_TAG }}
-            ghcr.io/${{ github.repository_owner }}/stockcontrol-app:latest
-            ${{ startsWith(github.ref, 'refs/tags/') && format('ghcr.io/{0}/stockcontrol-app:{1}', github.repository_owner, github.ref_name) || '' }}
-
-      # API
-      - name: Build & push api
-        uses: docker/build-push-action@v6
+      - name: Build and push backend
+        uses: docker/build-push-action@v5
         with:
           context: ./backend
           push: true
-          platforms: linux/amd64
           tags: |
-            ghcr.io/${{ github.repository_owner }}/stockcontrol-api:${{ env.IMAGE_TAG }}
-            ghcr.io/${{ github.repository_owner }}/stockcontrol-api:latest
-            ${{ startsWith(github.ref, 'refs/tags/') && format('ghcr.io/{0}/stockcontrol-api:{1}', github.repository_owner, github.ref_name) || '' }}
+            ${{ env.REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/stock-control-backend:${{ env.IMAGE_TAG }}
+            ${{ env.REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/stock-control-backend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push frontend
+        uses: docker/build-push-action@v5
+        with:
+          context: ./frontend
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/stock-control-frontend:${{ env.IMAGE_TAG }}
+            ${{ env.REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/stock-control-frontend:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   deploy:
-    needs: build-push
+    needs: build-and-push
     runs-on: ubuntu-latest
+    
     steps:
-      - name: Deploy over SSH
+      - name: Deploy to VPS
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.PROD_HOST }}
+          host: ${{ secrets.VPS_HOST }}
           username: deploy
-          key: ${{ secrets.PROD_DEPLOY_SSH_KEY }}
+          key: ${{ secrets.VPS_SSH_KEY }}
           port: 22
           script: |
             set -e
-            cd /home/deploy/apps/stockcontrol
+            cd /home/deploy/apps/stock-control
+            
+            # Login to GitHub Container Registry
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-            export IMAGE_TAG=${{ env.IMAGE_TAG }}   # ← usa el SHA del commit
-            docker compose -f docker-compose.prod.yml --env-file .env pull
-            docker compose -f docker-compose.prod.yml --env-file .env up -d
+            
+            # Create/update .env file with secrets
+            cat > .env << EOF
+            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}
+            IMAGE_TAG=${{ env.IMAGE_TAG }}
+            DOMAIN=${{ secrets.DOMAIN }}
+            DB_PASSWORD=${{ secrets.DB_PASSWORD }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            AFIP_MODE=${{ secrets.AFIP_MODE }}
+            RATE_LIMIT_WINDOW_MS=900000
+            RATE_LIMIT_MAX_REQUESTS=100
+            EOF
+            
+            # Pull new images
+            docker compose -f docker-compose.prod.yml pull
+            
+            # Stop and start services
+            docker compose -f docker-compose.prod.yml down
+            docker compose -f docker-compose.prod.yml up -d
+            
+            # Cleanup old images
             docker image prune -f
+            
+            # Health check
+            sleep 30
+            curl -f http://localhost/api/health || exit 1
