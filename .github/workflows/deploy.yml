@@ -1,63 +1,42 @@
-name: Build & Deploy
-
-on:
-  push:
-    branches: [ main ]
-  workflow_dispatch: {}
-
-permissions:
-  contents: read
-  packages: write
-
-concurrency:
-  group: deploy-${{ github.ref }}
-  cancel-in-progress: true
-
 env:
-  REGISTRY: ghcr.io
-  IMAGE_TAG: ${{ github.sha }}
+  IMAGE_TAG: ${{ github.sha }}   # usaremos el SHA como tag “inmutable”
 
 jobs:
   build-push:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Set up Buildx
-        uses: docker/setup-buildx-action@v3
-
-      - name: Login to GHCR
-        uses: docker/login-action@v3
+      - uses: actions/checkout@v4
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      # APP (Next)
-      - name: Build & push app image
+      # APP
+      - name: Build & push app
         uses: docker/build-push-action@v6
         with:
           context: ./stockcontrol-frontend
           push: true
           platforms: linux/amd64
           tags: |
-            ghcr.io/${{ github.repository }}/stockcontrol-app:${{ env.IMAGE_TAG }}
-            ghcr.io/${{ github.repository }}/stockcontrol-app:latest
+            ghcr.io/${{ github.repository_owner }}/stockcontrol-app:${{ env.IMAGE_TAG }}
+            ghcr.io/${{ github.repository_owner }}/stockcontrol-app:latest
+            ${{ startsWith(github.ref, 'refs/tags/') && format('ghcr.io/{0}/stockcontrol-app:{1}', github.repository_owner, github.ref_name) || '' }}
 
-      # API (Node)
-      - name: Build & push api image
+      # API
+      - name: Build & push api
         uses: docker/build-push-action@v6
         with:
           context: ./backend
           push: true
           platforms: linux/amd64
           tags: |
-            ghcr.io/${{ github.repository }}/stockcontrol-api:${{ env.IMAGE_TAG }}
-            ghcr.io/${{ github.repository }}/stockcontrol-api:latest
+            ghcr.io/${{ github.repository_owner }}/stockcontrol-api:${{ env.IMAGE_TAG }}
+            ghcr.io/${{ github.repository_owner }}/stockcontrol-api:latest
+            ${{ startsWith(github.ref, 'refs/tags/') && format('ghcr.io/{0}/stockcontrol-api:{1}', github.repository_owner, github.ref_name) || '' }}
 
   deploy:
     needs: build-push
@@ -66,15 +45,15 @@ jobs:
       - name: Deploy over SSH
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.SSH_HOST }}      
-          username: ${{ secrets.SSH_USER }}  
-          key: ${{ secrets.SSH_KEY }}        
-          port: ${{ secrets.SSH_PORT || '22' }}
+          host: ${{ secrets.PROD_HOST }}
+          username: deploy
+          key: ${{ secrets.PROD_DEPLOY_SSH_KEY }}
+          port: 22
           script: |
             set -e
             cd /home/deploy/apps/stockcontrol
             echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
-            export IMAGE_TAG=${{ github.sha }}
+            export IMAGE_TAG=${{ env.IMAGE_TAG }}   # ← usa el SHA del commit
             docker compose -f docker-compose.prod.yml --env-file .env pull
             docker compose -f docker-compose.prod.yml --env-file .env up -d
             docker image prune -f
