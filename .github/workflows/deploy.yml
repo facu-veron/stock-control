@@ -1,147 +1,79 @@
-name: Deploy to Production
+name: Build & Deploy
 
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  packages: write   # para publicar en GHCR
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_TAG: ${{ github.sha }}   # etiqueta inmutable
 
 jobs:
-  deploy:
+  build-push:
     runs-on: ubuntu-latest
-    
     steps:
-    - name: Checkout code
-      uses: actions/checkout@v4
-      
-    - name: Test SSH Connectivity First
-      run: |
-        echo "🔍 Testing SSH connectivity to ${{ secrets.PROD_HOST }}"
-        # Test common SSH ports
-        for port in 22 2222 2022 22222; do
-          echo "Testing port $port..."
-          if timeout 10s bash -c "</dev/tcp/${{ secrets.PROD_HOST }}/$port" 2>/dev/null; then
-            echo "✅ Port $port is open"
-          else
-            echo "❌ Port $port is closed or filtered"
-          fi
-        done
+      - uses: actions/checkout@v4
 
-    - name: Deploy to VPS
-      uses: appleboy/ssh-action@v1.0.3
-      with:
-        host: ${{ secrets.PROD_HOST }}
-        username: ${{ secrets.PROD_USERNAME }}
-        key: ${{ secrets.PROD_DEPLOY_SSH_KEY }}
-        port: 22
-        timeout: 30s
-        command_timeout: 10m
-        script: |
-          echo "🚀 Iniciando deploy de Stock Control..."
-          
-          # Directorio de trabajo (usando root)
-          DEPLOY_DIR="/root/stockcontrol"
-          
-          echo "👤 Usuario: $(whoami)"
-          echo "📁 Deploy dir: $DEPLOY_DIR"
-          
-          # Crear directorio de trabajo
-          mkdir -p $DEPLOY_DIR || true
-          cd $DEPLOY_DIR
-          
-          # Limpiar completamente y empezar de cero
-          echo "🧹 Limpieza completa del directorio..."
-          docker system prune -af --volumes || true
-          rm -rf backend frontend nginx postgres-init docker-compose.prod.yml Makefile ssl || true
-          
-          # Clonar o actualizar repositorio
-          if [ ! -d "stock-control" ]; then
-            echo "📥 Clonando repositorio..."
-            git clone https://github.com/${{ github.repository }}.git stock-control
-          else
-            echo "🔄 Actualizando código..."
-            cd stock-control
-            git fetch origin
-            git reset --hard origin/main
-            cd ..
-          fi
-          
-          # Copiar archivos necesarios desde el repo
-          echo "📁 Preparando archivos..."
-          cp -r stock-control/backend ./
-          cp -r stock-control/frontend ./
-          cp -r stock-control/nginx ./
-          cp -r stock-control/postgres-init ./
-          cp stock-control/docker-compose.prod.yml ./
-          cp stock-control/Makefile ./
-          cp stock-control/setup-ssl.sh ./
-          
-          # Crear archivo de variables de entorno para producción
-          cat > .env.prod << 'ENV_EOF'
-          PROD_DB_PASSWORD=${{ secrets.PROD_DB_PASSWORD }}
-          PROD_JWT_SECRET=${{ secrets.PROD_JWT_SECRET }}
-          ENV_EOF
-          
-          # Crear directorio SSL
-          mkdir -p ssl ssl/webroot
-          
-          # Detener servicios existentes si existen
-          echo "🛑 Deteniendo servicios existentes..."
-          docker-compose -f docker-compose.prod.yml --env-file .env.prod down || true
-          
-          # Limpiar imágenes antiguas
-          echo "🧹 Limpiando imágenes antiguas..."
-          docker image prune -f || true
-          
-          # Levantar servicios
-          echo "🐳 Levantando servicios..."
-          docker-compose -f docker-compose.prod.yml --env-file .env.prod up -d --build
-          
-          # Esperar que los servicios estén listos
-          echo "⏳ Esperando que los servicios estén listos..."
-          sleep 45
-          
-          # Ejecutar migraciones de Prisma
-          echo "🗄️ Ejecutando migraciones..."
-          docker-compose -f docker-compose.prod.yml --env-file .env.prod exec -T backend npx prisma migrate deploy || echo "❌ Error en migraciones, continuando..."
-          
-          # Verificar estado de servicios
-          echo "✅ Verificando servicios..."
-          docker-compose -f docker-compose.prod.yml --env-file .env.prod ps
-          
-          # Verificar conectividad
-          echo "🌐 Verificando conectividad..."
-          sleep 10
-          
-          # Probar health check de nginx
-          if curl -s http://localhost/nginx-health > /dev/null; then
-            echo "✅ Nginx está funcionando correctamente"
-          else
-            echo "❌ Nginx no responde al health check"
-            docker-compose -f docker-compose.prod.yml --env-file .env.prod logs nginx | tail -10
-          fi
-          
-          # Verificar servicios internos
-          echo "🔍 Verificando servicios internos..."
-          docker-compose -f docker-compose.prod.yml --env-file .env.prod exec -T frontend wget -qO- http://localhost:3000 > /dev/null && echo "✅ Frontend OK" || echo "❌ Frontend no responde"
-          docker-compose -f docker-compose.prod.yml --env-file .env.prod exec -T backend curl -f http://localhost:3001 > /dev/null && echo "✅ Backend OK" || echo "❌ Backend no responde"
-          
-          
-          echo "🎉 Deploy completado!"
-          echo ""
-          echo "🌐 La aplicación está disponible en:"
-          echo "   ✅ HTTP:  http://stockcontrol.unlimitdevsoftware.com"
-          echo ""
-          echo "📋 Para habilitar HTTPS con certificados reales:"
-          echo "   1. Conéctate al servidor: ssh root@${{ secrets.PROD_HOST }}"
-          echo "   2. Ve al directorio: cd $DEPLOY_DIR"
-          echo "   3. Ejecuta: chmod +x setup-ssl.sh && ./setup-ssl.sh"
-          echo ""
-          echo "✨ ¡El deploy HTTP está funcionando perfectamente!"
-          
-    - name: Notify Success
-      if: success()
-      run: echo "✅ Deploy exitoso a producción"
-        
-    - name: Notify Failure
-      if: failure()
-      run: echo "❌ Deploy falló - revisar logs"
+      - name: Set up Buildx
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Login to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # APP (Next)
+      - name: Build & push app
+        uses: docker/build-push-action@v6
+        with:
+          context: ./stockcontrol-frontend
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository }}/stockcontrol-app:${{ env.IMAGE_TAG }}
+            ghcr.io/${{ github.repository }}/stockcontrol-app:latest
+
+      # API (Node)
+      - name: Build & push api
+        uses: docker/build-push-action@v6
+        with:
+          context: ./backend
+          push: true
+          platforms: linux/amd64
+          tags: |
+            ghcr.io/${{ github.repository }}/stockcontrol-api:${{ env.IMAGE_TAG }}
+            ghcr.io/${{ github.repository }}/stockcontrol-api:latest
+
+  deploy:
+    needs: build-push
+    runs-on: ubuntu-latest
+    steps:
+      - name: Deploy over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}           # 193.203.182.87
+          username: ${{ secrets.SSH_USER }}       # deploy
+          key: ${{ secrets.SSH_KEY }}             # tu clave privada (ed25519)
+          port: ${{ secrets.SSH_PORT || 22 }}
+          script: |
+            set -e
+            cd /home/deploy/apps/stockcontrol
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+            export IMAGE_TAG=${{ env.IMAGE_TAG }}
+            export DB_USER=$(grep DB_USER .env | cut -d= -f2)
+            export DB_PASSWORD=$(grep DB_PASSWORD .env | cut -d= -f2)
+            export DB_NAME=$(grep DB_NAME .env | cut -d= -f2)
+            docker compose -f docker-compose.prod.yml --env-file .env pull
+            docker compose -f docker-compose.prod.yml --env-file .env up -d
+            docker image prune -f
