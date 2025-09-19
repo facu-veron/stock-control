@@ -46,6 +46,8 @@ jobs:
         with:
           context: ./frontend
           push: true
+          build-args: |
+            NEXT_PUBLIC_API_URL=https://api.${{ secrets.DOMAIN }}/api
           tags: |
             ${{ env.REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/stock-control-frontend:${{ env.IMAGE_TAG }}
             ${{ env.REGISTRY }}/${{ secrets.DOCKER_USERNAME }}/stock-control-frontend:latest
